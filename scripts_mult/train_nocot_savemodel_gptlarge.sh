@@ -41,10 +41,10 @@ export LR=5e-5
 export MODEL=gpt2-large
 export BSZ=32
 export D=5
-export FOLDER=long_mult_${D}
+export FOLDER=long_mult_${D}_inter
 export SAVE=model_nocot_${D}_gptlarge
 mkdir $SAVE
-CUDA_VISIBLE_DEVICES=3 stdbuf -oL -eL python train_nocot_savemodel.py \
+CUDA_VISIBLE_DEVICES=1 stdbuf -oL -eL python train_nocot_savemodel.py \
     --train_path data/${FOLDER}/src1_train.txt \
     --val_path data/${FOLDER}/src1_valid.txt \
     --test_path data/${FOLDER}/src1_test.txt \

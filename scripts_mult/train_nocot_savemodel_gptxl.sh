@@ -41,10 +41,10 @@ export LR=5e-5
 export MODEL=gpt2-xl
 export BSZ=32
 export D=5
-export FOLDER=long_mult_${D}
+export FOLDER=long_mult_${D}_inter
 export SAVE=model_nocot_${D}_gptxl
 mkdir $SAVE
-CUDA_VISIBLE_DEVICES=3 stdbuf -oL -eL python train_nocot_savemodel.py \
+CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python train_nocot_savemodel.py \
     --train_path data/${FOLDER}/src1_train.txt \
     --val_path data/${FOLDER}/src1_valid.txt \
     --test_path data/${FOLDER}/src1_test.txt \
@@ -121,6 +121,26 @@ export FOLDER=long_mult_${D}
 export SAVE=model_nocot_${D}_gptxl
 mkdir $SAVE
 CUDA_VISIBLE_DEVICES=3 stdbuf -oL -eL python train_nocot_savemodel.py \
+    --train_path data/${FOLDER}/src1_train.txt \
+    --val_path data/${FOLDER}/src1_valid.txt \
+    --test_path data/${FOLDER}/src1_test.txt \
+    --epochs $EPOCHS \
+    --lr $LR \
+    --model $MODEL \
+    --batch_size $BSZ \
+    --save_model /n/holyscratch01/rush_lab/Users/yuntian/implicit/$SAVE \
+    > ${SAVE}/log.train.text.model${MODEL}.folder${FOLDER}.e${EPOCHS}.lr${LR}.${BSZ} 2>&1&
+
+
+export EPOCHS=15
+export LR=5e-5
+export MODEL=gpt2-xl
+export BSZ=32
+export D=5
+export FOLDER=long_mult_${D}_inter
+export SAVE=model_nocot_${D}_gptxl_fp32
+mkdir $SAVE
+CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python train_nocot_savemodel.py \
     --train_path data/${FOLDER}/src1_train.txt \
     --val_path data/${FOLDER}/src1_valid.txt \
     --test_path data/${FOLDER}/src1_test.txt \

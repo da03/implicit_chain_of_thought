@@ -344,6 +344,7 @@ def main():
              nn.ReLU(),
              nn.Linear(hidden_size_mid, hidden_size_out),
              ) for _ in range(num_layers_q)]).to(device).to(ptdtype)
+    mlps.load_state_dict(torch.load(os.path.join(args.model, 'mlps.pt')))
     #mlps.load_state_dict(torch.load(os.path.join(args.qmodel, 'mlps.pt')))
     #sigmas = torch.zeros(num_layers).to(ptdtype).to(device)
     sigmas = torch.nn.Parameter(sigmas)

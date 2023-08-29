@@ -9,6 +9,8 @@ import sys
 import tqdm
 from data import NoCoTDataset, DataCollator
 import logging
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
 logging.disable(logging.INFO) # disable INFO and DEBUG logging everywhere
 # or 
 logging.disable(logging.WARNING) # disable WARNING, INFO and DEBUG logging everywhere
@@ -25,88 +27,89 @@ def extract_answer(text):
         ans = ans.strip().replace(',', '')
         return ans
 
-def evaluate(model, dataloader, tokenizer):
-    total = 0
-    word_correct = 0
-    total_correct = 0
-    total_loss = 0
-    total_instances = 0
-    for batch in tqdm.tqdm(dataloader):
-        input_ids = batch['input_ids'].to(device)
-        labels = batch['labels'].to(device)
-        with torch.no_grad():
-            outputs = model(input_ids=input_ids, labels=labels)
-        logits = outputs.logits
-        shift_logits = logits[..., :-1, :].contiguous()
-        shift_labels = labels[..., 1:].contiguous()
-        loss_fct = CrossEntropyLoss()
-        loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-        total_loss += loss.item() * labels[...,1:].ge(0).sum().item()
+def evaluate(model, dataloader, tokenizer, ctx, beam_size=5):
+    with torch.no_grad():
+        total = 0
+        word_correct = 0
+        total_correct = 0
+        total_loss = 0
+        total_instances = 0
+        for batch in tqdm.tqdm(dataloader):
+            input_ids = batch['input_ids'].to(device)
+            labels = batch['labels'].to(device)
+            with ctx:
+                outputs = model(input_ids=input_ids, labels=labels)
+            logits = outputs.logits
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            loss_fct = CrossEntropyLoss()
+            loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+            total_loss += loss.item() * labels[...,1:].ge(0).sum().item()
 
-        labels_pred = logits.argmax(-1)
-        correct = ((labels_pred[...,:-1] == labels[..., 1:]) * labels[..., 1:].ge(0)).sum().item()
-        word_correct += correct
-        total += labels[..., 1:].ge(0).sum().item()
-        # TODO: generate and evaluate accuracy
-        # activate beam search and early_stopping
-        #import pdb; pdb.set_trace()
-
-        sep_ids = []
-        for i, input_ids_single in enumerate(input_ids):
-            total_instances += 1
-            sep_id = input_ids_single.tolist().index(tokenizer.eos_token_id)
-            sep_ids.append(sep_id)
-        assert all([item == sep_id for item in sep_ids])
-        beam_output = model.generate(
-            input_ids=input_ids[:, :sep_id+1],
-            max_new_tokens=300,
-            num_beams=5,
-            early_stopping=True,
-            num_return_sequences=1,
-        )
-            ##src = input_ids_single[:sep_idx+1]
-            ##tgt = input_ids_single[sep_idx+1:]
-
-            ##sep_idx = tgt.tolist().index(tokenizer.eos_token_id)
-            ##tgt = tgt[:sep_idx]
-            ##tgt_text = tokenizer.decode(tgt)
-            ###ans = extract_answer(tgt_text)
-            ##ans = tgt_text.strip()
-
-
-            ##beam_output = model.generate(
-            ##    input_ids=src.view(1, -1),
-            ##    max_new_tokens=100,
-            ##    num_beams=5,
-            ##    early_stopping=True,
-            ##    num_return_sequences=1,
-            ##)
-            ##
-        #import pdb; pdb.set_trace()
-        i = 0
-        for input_ids_single, beam_output_i in zip(input_ids, beam_output):
-            tgt = input_ids_single[sep_id+1:]
-            #tgt = tgt[:sep_id]
-            tgt_text = tokenizer.decode(tgt, skip_special_tokens=True)
-            ans = tgt_text.strip()
-            pred_text = tokenizer.decode(beam_output_i[sep_id+1:], skip_special_tokens=True)
-            if i == 0:
-                #print ("Output:\n" + 100 * '-')
-                #print (pred_text)
-                print ("\n" + 100 * '-')
-                print ('GT:', tokenizer.decode(input_ids_single))
-                print ('Predicted:', pred_text)
-            pred_ans = pred_text.strip() #.split()[-1] #extract_answer(pred_text)
+            labels_pred = logits.argmax(-1)
+            correct = ((labels_pred[...,:-1] == labels[..., 1:]) * labels[..., 1:].ge(0)).sum().item()
+            word_correct += correct
+            total += labels[..., 1:].ge(0).sum().item()
+            # TODO: generate and evaluate accuracy
+            # activate beam search and early_stopping
             #import pdb; pdb.set_trace()
-            if ans == pred_ans:
-                total_correct += 1
-            i += 1
-        #break
 
-    word_accuracy = word_correct / total
-    accuracy = total_correct / total_instances
-    loss = total_loss / total
-    ppl = math.exp(loss)
+            sep_ids = []
+            for i, input_ids_single in enumerate(input_ids):
+                total_instances += 1
+                sep_id = input_ids_single.tolist().index(tokenizer.eos_token_id)
+                sep_ids.append(sep_id)
+            assert all([item == sep_id for item in sep_ids])
+            beam_output = model.generate(
+                input_ids=input_ids[:, :sep_id+1],
+                max_new_tokens=300,
+                num_beams=beam_size,
+                early_stopping=True,
+                num_return_sequences=1,
+            )
+                ##src = input_ids_single[:sep_idx+1]
+                ##tgt = input_ids_single[sep_idx+1:]
+
+                ##sep_idx = tgt.tolist().index(tokenizer.eos_token_id)
+                ##tgt = tgt[:sep_idx]
+                ##tgt_text = tokenizer.decode(tgt)
+                ###ans = extract_answer(tgt_text)
+                ##ans = tgt_text.strip()
+
+
+                ##beam_output = model.generate(
+                ##    input_ids=src.view(1, -1),
+                ##    max_new_tokens=100,
+                ##    num_beams=5,
+                ##    early_stopping=True,
+                ##    num_return_sequences=1,
+                ##)
+                ##
+            #import pdb; pdb.set_trace()
+            i = 0
+            for input_ids_single, beam_output_i in zip(input_ids, beam_output):
+                tgt = input_ids_single[sep_id+1:]
+                #tgt = tgt[:sep_id]
+                tgt_text = tokenizer.decode(tgt, skip_special_tokens=True)
+                ans = tgt_text.strip()
+                pred_text = tokenizer.decode(beam_output_i[sep_id+1:], skip_special_tokens=True)
+                if i == 0:
+                    #print ("Output:\n" + 100 * '-')
+                    #print (pred_text)
+                    print ("\n" + 100 * '-')
+                    print ('GT:', tokenizer.decode(input_ids_single))
+                    print ('Predicted:', pred_text)
+                pred_ans = pred_text.strip() #.split()[-1] #extract_answer(pred_text)
+                #import pdb; pdb.set_trace()
+                if ans == pred_ans:
+                    total_correct += 1
+                i += 1
+            #break
+
+        word_accuracy = word_correct / total
+        accuracy = total_correct / total_instances
+        loss = total_loss / total
+        ppl = math.exp(loss)
     return accuracy, word_accuracy, ppl
 
 
@@ -127,10 +130,25 @@ def main():
 
     
     tokenizer = AutoTokenizer.from_pretrained(args.model)
-    model = AutoModelForCausalLM.from_pretrained(args.model).to(device)
+    dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
+    if 'gpt2-xl' not in args.model:
+        dtype = 'float32'
+        beam_size = 5
+    else:
+        dtype = 'float32'
+        beam_size = 1
+    ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
+    print (ptdtype, dtype, beam_size)
+    model = AutoModelForCausalLM.from_pretrained(args.model).to(device).to(ptdtype)
+    model = torch.compile(model)
     # TODO: maybe use pretrained model here?
     #model.apply(model._init_weights)
-    optimizer = AdamW(model.parameters(), lr=args.lr)
+    #optimizer = AdamW(model.parameters(), lr=args.lr)
+    # Create AdamW optimizer and use the fused version if it is available
+    #fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
+    use_fused = True 
+    extra_args = dict(fused=True) if use_fused else dict()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, **extra_args)
 
     collate_fn = DataCollator(tokenizer)
     train_dataset = NoCoTDataset(tokenizer, args.train_path, 1024)
@@ -138,7 +156,10 @@ def main():
     val_dataset = NoCoTDataset(tokenizer, args.val_path, 1024)
     val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True)
 
-    accuracy, word_accuracy, ppl = evaluate(model, val_dataloader, tokenizer)
+    torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
+    torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
+    ctx = torch.amp.autocast(device_type='cuda', dtype=ptdtype)
+    accuracy, word_accuracy, ppl = evaluate(model, val_dataloader, tokenizer, ctx, beam_size)
     print (f'Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
     model.train()
     step = 0
@@ -157,7 +178,8 @@ def main():
             #    import pdb; pdb.set_trace()
             input_ids = batch['input_ids'].to(device)
             labels = batch['labels'].to(device)
-            outputs = model(input_ids=input_ids)
+            with ctx:
+                outputs = model(input_ids=input_ids)
             #loss = outputs.loss
             logits = outputs.logits
 
@@ -181,7 +203,7 @@ def main():
                 print (f"Step: {step}. PPL: {ppl}. Accuracy: {accuracy}")
                 sys.stdout.flush()
             step += 1
-        accuracy, word_accuracy, ppl = evaluate(model, val_dataloader, tokenizer)
+        accuracy, word_accuracy, ppl = evaluate(model, val_dataloader, tokenizer, ctx, beam_size)
         print (f'Epoch {epoch}. Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
         model.train()
 

@@ -64,7 +64,7 @@ export FOLDER=long_mult_${D}
 export FOLDER=long_mult_${D}_inter
 export SAVE=model_cot_${D}_inter_gptmedium
 mkdir $SAVE
-CUDA_VISIBLE_DEVICES=3 stdbuf -oL -eL python train_cot_savemodel.py \
+TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=1 stdbuf -oL -eL python train_cot_savemodel.py \
     --train_path data/${FOLDER}/src1_train.txt \
     --val_path data/${FOLDER}/src1_valid.txt \
     --test_path data/${FOLDER}/src1_test.txt \

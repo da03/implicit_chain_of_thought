@@ -37,7 +37,7 @@ def extract_answer(text):
     ans = text.strip().replace(',', '')
     return ans
 
-def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode):
+def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode, follow=None):
     model.eval()
     model_q.eval()
     total = 0
@@ -73,11 +73,32 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode):
                 try:
                     last_id = mask_id_list[first_id:].index(True) + first_id
                 except ValueError:
-                    last_id = len(mask_id_list)
+                    #last_id = len(mask_id_list)
+                    if follow == 'diagonal_orig':
+                        last_id = len(mask_id_list)
+                    elif follow == 'diagonal':
+                        last_id = len(mask_id_list)
+                    else:
+                        last_id = len(mask_id_list) - 1
+                        last_id -= 1
 
                 ###layers = torch.arange(start=0, end=num_layers+1)
                 layers = torch.arange(start=0, end=num_layers)
-                ids = torch.round(first_id + layers * (last_id - 1 - first_id) / (num_layers))
+                #   ids = torch.round(first_id + layers * (last_id - 1 - first_id) / (num_layers))
+                if follow == 'diagonal':
+                    ids = torch.round(first_id + layers * (last_id - 1 - first_id) / (num_layers-1))
+                elif follow == 'diagonal_orig': # todo: rerun experiments with new setting, but don't think this would change things much
+                    ids = torch.round(first_id + layers * (last_id - 1 - first_id) / (num_layers))
+                elif follow == 'first_column':
+                    ids = torch.round(first_id + 0 * layers * (last_id - 1 - first_id) / (num_layers-1))
+                elif follow == 'last_column':
+                    ids = torch.round(last_id-1 + 0 * layers * (last_id - 1 - first_id) / (num_layers-1))
+                elif follow == 'top_row':
+                    ids = torch.round(first_id + layers * (last_id - 1 - first_id) / (num_layers-1))
+                elif follow == 'bottom_row':
+                    ids = torch.round(first_id + layers * (last_id - 1 - first_id) / (num_layers-1))
+                else:
+                    assert False
                 relevant_ids[batch_id] = ids
             #import pdb; pdb.set_trace()
 
@@ -85,7 +106,15 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode):
             hidden_state_relevant_list = []
             zs0 = []
             for i, hidden_states in enumerate(hidden_states_cot[:-1]):
-                hidden_state_relevant = hidden_states.gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1)
+                #hidden_state_relevant = hidden_states.gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1)
+                if follow == 'diagonal' or follow == 'diagonal_orig' or follow == 'first_column' or follow == 'last_column':
+                    hidden_state_relevant = (hidden_states.gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                elif follow == 'top_row':
+                    hidden_state_relevant = (hidden_states_cot[-2].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                elif follow == 'bottom_row':
+                    hidden_state_relevant = (hidden_states_cot[0].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                else:
+                    assert False
                 zs0.append(hidden_state_relevant)
                 #hidden_state_relevant_list.append(hidden_state_relevant + torch.randn_like(hidden_state_relevant) * sigmas[i])
                 hidden_state_relevant_list.append(hidden_state_relevant)
@@ -195,13 +224,17 @@ def main():
     parser.add_argument('--model', type=str, default='gpt2')
     parser.add_argument('--save_model', type=str, default='model_nocot')
     parser.add_argument('--qmodel', type=str, default='gpt2')
-    parser.add_argument('--mode', type=str, choices=['top', 'interleave'], default='top')
+    parser.add_argument('--residual', type=int, default=0)
+    parser.add_argument('--mode', type=str, choices=['top', 'interleave', 'bottom', 'none'], default='none')
+    parser.add_argument('--follow', type=str, choices=['diagonal', 'diagonal_orig', 'last_column', 'top_row', 'bottom_row', 'first_column'], default='diagonal_orig')
     args = parser.parse_args()
 
     print (args)
     
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
+    if 'gpt2-xl' not in args.model:
+        dtype = 'float32'
     dtype = 'float32'
     ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
     print (ptdtype, dtype)
@@ -252,7 +285,7 @@ def main():
 
     #accuracy, word_accuracy, ppl = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas)
     #print (f'Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
-    ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode)
+    ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.follow)
     print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Accuracy: {accuracy}")
     #model.train()
     #model_q.train()
@@ -298,11 +331,39 @@ def main():
                     try:
                         last_id = mask_id_list[first_id:].index(True) + first_id
                     except ValueError:
-                        last_id = len(mask_id_list)
+                        #last_id = len(mask_id_list)
+                        if args.follow == 'diagonal_orig':
+                            last_id = len(mask_id_list)
+                        elif args.follow == 'diagonal':
+                            last_id = len(mask_id_list)
+                        else:
+                            last_id = len(mask_id_list) - 1
+                            last_id -= 1
 
                     ##layers = torch.arange(start=0, end=num_layers+1)
                     layers = torch.arange(start=0, end=num_layers)
-                    ids = torch.round(first_id + layers * (last_id - 1 - first_id) / (num_layers))
+                    #ids = torch.round(first_id + layers * (last_id - 1 - first_id) / (num_layers))
+                    if args.follow == 'diagonal':
+                        ids = torch.round(first_id + layers * (last_id - 1 - first_id) / (num_layers-1))
+                    elif args.follow == 'diagonal_orig': # todo: rerun experiments with new setting, but don't think this would change things much
+                        ids = torch.round(first_id + layers * (last_id - 1 - first_id) / (num_layers))
+                    elif args.follow == 'first_column':
+                        ids = torch.round(first_id + 0 * layers * (last_id - 1 - first_id) / (num_layers-1))
+                    elif args.follow == 'last_column':
+                        ids = torch.round(last_id-1 + 0 * layers * (last_id - 1 - first_id) / (num_layers-1))
+                    elif args.follow == 'top_row':
+                        ids = torch.round(first_id + layers * (last_id - 1 - first_id) / (num_layers-1))
+                    elif args.follow == 'bottom_row':
+                        ids = torch.round(first_id + layers * (last_id - 1 - first_id) / (num_layers-1))
+                    else:
+                        assert False
+                    if step == 0 and batch_id == 0:
+                        print ('first id', first_id, 'last_id', last_id)
+                        print ('ids', ids)
+                        if args.follow != 'diagonal_orig':
+                            print ('WARNING: last id is manually subtracting 1 to remove the trailing space!')
+                        else:
+                            print ('WARNING: future experiments should try to use fixed setting!')
                     relevant_ids[batch_id] = ids
                 #import pdb; pdb.set_trace()
 
@@ -310,7 +371,15 @@ def main():
                 hidden_state_relevant_list = []
                 zs0 = []
                 for i, hidden_states in enumerate(hidden_states_cot[:-1]):
-                    hidden_state_relevant = hidden_states.gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1)
+                    #hidden_state_relevant = hidden_states.gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1)
+                    if args.follow == 'diagonal' or args.follow == 'diagonal_orig' or args.follow == 'first_column' or args.follow == 'last_column':
+                        hidden_state_relevant = (hidden_states.gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                    elif args.follow == 'top_row':
+                        hidden_state_relevant = (hidden_states_cot[-2].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                    elif args.follow == 'bottom_row':
+                        hidden_state_relevant = (hidden_states_cot[0].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                    else:
+                        assert False
                     zs0.append(hidden_state_relevant)
                     #hidden_state_relevant_list.append(hidden_state_relevant + torch.randn_like(hidden_state_relevant) * sigmas[i])
                     hidden_state_relevant_list.append(hidden_state_relevant)
@@ -372,7 +441,7 @@ def main():
             step += 1
     #    accuracy, word_accuracy, ppl = evaluate(model, model_q, train_dataloader, tokenizer, ctx, sigmas)
     #    accuracy, word_accuracy, ppl = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas)
-        ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode)
+        ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.follow)
         print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Accuracy: {accuracy}")
         #print (f'Epoch {epoch}. Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
         #print ('sigmas', sigmas)

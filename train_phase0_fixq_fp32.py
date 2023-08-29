@@ -13,6 +13,8 @@ import logging
 import random
 import torch.nn as nn
 torch.backends.cuda.matmul.allow_tf32 = True
+
+# The flag below controls whether to allow TF32 on cuDNN. This flag defaults to True.
 torch.backends.cudnn.allow_tf32 = True
 torch.autograd.set_detect_anomaly(True)
 random.seed(1234)
@@ -23,6 +25,40 @@ logging.disable(logging.WARNING) # disable WARNING, INFO and DEBUG logging every
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+def set_relevant_zs(mode, zs_p, zs_q):
+    #import pdb; pdb.set_trace()
+    if mode == 'none':
+        pass
+    elif mode == 'top':
+        diff = len(zs_p) - len(zs_q)
+        zs_p[diff:] = zs_q
+    elif mode == 'bottom':
+        #if len(zs_q) < len(zs_p):
+        #    #diff = len(zs_p) - len(zs_q)
+        zs_p[:len(zs_q)] = zs_q
+    elif mode == 'interleave':
+        assert False
+        if len(zs_q) < len(zs_p):
+            a = len(zs_p) // len(zs_q)
+            zs_p = zs_p[(a-1)::a]
+    else:
+        assert False
+    #assert len(zs_p) == len(zs_q)
+    #return zs_p
+def get_relevant_zs(zs_p, zs_q, mode):
+    #import pdb; pdb.set_trace()
+    if mode == 'top':
+        if len(zs_q) < len(zs_p):
+            diff = len(zs_p) - len(zs_q)
+            zs_p = zs_p[diff:]
+    elif mode == 'interleave':
+        if len(zs_q) < len(zs_p):
+            a = len(zs_p) // len(zs_q)
+            zs_p = zs_p[(a-1)::a]
+    else:
+        assert False
+    assert len(zs_p) == len(zs_q)
+    return zs_p
 
 def save_model(model, model_q, mlps, tokenizer, model_dir):
     os.makedirs(model_dir, exist_ok=True)
@@ -40,7 +76,7 @@ def extract_answer(text):
     ans = text.strip().replace(',', '')
     return ans
 
-def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode):
+def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode, residual=False, follow=None):
     model.eval()
     model_q.eval()
     total = 0
@@ -50,6 +86,8 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode):
     total_loss_nll = 0
     total_loss_kl = 0
     total_instances = 0
+    num_layers_p = len(model.transformer.h)
+    num_layers_q = len(model_q.transformer.h)
     for batch in tqdm.tqdm(dataloader):
         input_ids_cot = batch['input_ids_cot'].to(device)
         input_ids_nocot = batch['input_ids_nocot'].to(device)
@@ -76,11 +114,32 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode):
                 try:
                     last_id = mask_id_list[first_id:].index(True) + first_id
                 except ValueError:
-                    last_id = len(mask_id_list)
+                    #last_id = len(mask_id_list)
+                    if follow == 'diagonal_orig':
+                        last_id = len(mask_id_list)
+                    elif follow == 'diagonal':
+                        last_id = len(mask_id_list)
+                    else:
+                        last_id = len(mask_id_list) - 1
+                        last_id -= 1
 
                 ###layers = torch.arange(start=0, end=num_layers+1)
                 layers = torch.arange(start=0, end=num_layers)
-                ids = torch.round(first_id + layers * (last_id - 1 - first_id) / (num_layers))
+                #   ids = torch.round(first_id + layers * (last_id - 1 - first_id) / (num_layers))
+                if follow == 'diagonal':
+                    ids = torch.round(first_id + layers * (last_id - 1 - first_id) / (num_layers-1))
+                elif follow == 'diagonal_orig': # todo: rerun experiments with new setting, but don't think this would change things much
+                    ids = torch.round(first_id + layers * (last_id - 1 - first_id) / (num_layers))
+                elif follow == 'first_column':
+                    ids = torch.round(first_id + 0 * layers * (last_id - 1 - first_id) / (num_layers-1))
+                elif follow == 'last_column':
+                    ids = torch.round(last_id-1 + 0 * layers * (last_id - 1 - first_id) / (num_layers-1))
+                elif follow == 'top_row':
+                    ids = torch.round(first_id + layers * (last_id - 1 - first_id) / (num_layers-1))
+                elif follow == 'bottom_row':
+                    ids = torch.round(first_id + layers * (last_id - 1 - first_id) / (num_layers-1))
+                else:
+                    assert False
                 relevant_ids[batch_id] = ids
             #import pdb; pdb.set_trace()
 
@@ -88,13 +147,24 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode):
             hidden_state_relevant_list = []
             zs0 = []
             for i, hidden_states in enumerate(hidden_states_cot[:-1]):
-                hidden_state_relevant = hidden_states.gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1)
-                hidden_state_relevant = mlps[i](hidden_state_relevant)
+                if follow == 'diagonal' or follow == 'diagonal_orig' or follow == 'first_column' or follow == 'last_column':
+                    hidden_state_relevant = mlps[i](hidden_states.gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                elif follow == 'top_row':
+                    hidden_state_relevant = mlps[i](hidden_states_cot[-2].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                elif follow == 'bottom_row':
+                    hidden_state_relevant = mlps[i](hidden_states_cot[0].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                else:
+                    assert False
+                #hidden_state_relevant = mlps[i](hidden_state_relevant)
                 zs0.append(hidden_state_relevant)
                 #hidden_state_relevant_list.append(hidden_state_relevant + torch.randn_like(hidden_state_relevant) * sigmas[i])
                 hidden_state_relevant_list.append(hidden_state_relevant)
             zs = hidden_state_relevant_list
-            outputs_nocot = model.forward_zs(input_ids=input_ids_nocot, zs=hidden_state_relevant_list, first_ids=first_ids)
+            zs_model = [None for _ in range(num_layers_p)]
+            #import pdb; pdb.set_trace()
+            set_relevant_zs(mode, zs_model, zs)
+            #outputs_nocot = model.forward_zs(input_ids=input_ids_nocot, zs=zs_model, first_ids=first_ids, residual=False)
+            outputs_nocot = model.forward_zs(input_ids=input_ids_nocot, zs=zs_model, first_ids=first_ids, residual=residual)
             #outputs_nocot = model.forward_zs_attn(input_ids=input_ids_nocot, attended_to=hidden_states_cot, attended_to_mask=~mask, first_ids=first_ids, sigmas=sigmas)
             zs_p = outputs_nocot.zs_p
             zs_q = zs0 #outputs_nocot.zs_q
@@ -127,7 +197,6 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode):
         assert all([item == sep_id for item in sep_ids])
         #import pdb; pdb.set_trace()
         beam_size = 5
-        beam_size = 1
         beam_output = model.generate(
             input_ids=input_ids_nocot[:, :sep_id+1],
             max_new_tokens=100,
@@ -135,7 +204,7 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode):
             early_stopping=True,
             num_return_sequences=1,
             first_ids=first_ids.repeat_interleave(beam_size, dim=0),
-            zs=[z.repeat_interleave(beam_size, dim=0) for z in zs],
+            zs=[z.repeat_interleave(beam_size, dim=0) if z is not None else z for z in zs_model],
         )
             ##src = input_ids_single[:sep_idx+1]
             ##tgt = input_ids_single[sep_idx+1:]
@@ -238,14 +307,18 @@ def main():
     parser.add_argument('--model', type=str, default='gpt2')
     parser.add_argument('--save_model', type=str, default='model_nocot')
     parser.add_argument('--qmodel', type=str, default='gpt2')
-    parser.add_argument('--mode', type=str, choices=['top', 'interleave'], default='top')
+    parser.add_argument('--residual', type=int, default=0)
+    parser.add_argument('--mode', type=str, choices=['top', 'interleave', 'bottom', 'none'], default='none')
+    parser.add_argument('--follow', type=str, choices=['diagonal', 'diagonal_orig', 'last_column', 'top_row', 'bottom_row', 'first_column'], default='diagonal_orig')
     args = parser.parse_args()
 
     print (args)
     
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
-    #dtype = 'float32'
+    if 'gpt2-xl' not in args.model:
+        dtype = 'float32'
+    dtype = 'float32'
     ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
     print (ptdtype, dtype)
     model_q = AutoModelForCausalLM.from_pretrained(args.qmodel).to(device).to(ptdtype)
@@ -257,26 +330,29 @@ def main():
     use_fused = fused_available
     extra_args = dict(fused=True) if use_fused else dict()
     num_layers = len(model.transformer.h)
-    sigmas = torch.ones(num_layers).to(ptdtype).to(device)
-    hidden_size_in = model.config.hidden_size
-    hidden_size_out = model_q.config.hidden_size
+    num_layers_p = num_layers
+    num_layers_q = len(model_q.transformer.h)
+    sigmas = torch.ones(num_layers_q).to(ptdtype).to(device)
+    hidden_size_in = model_q.config.hidden_size
+    hidden_size_out = model.config.hidden_size
     hidden_size_mid = 4 * max(hidden_size_in, hidden_size_out)
     mlps = nn.ModuleList([nn.Sequential(
              nn.Linear(hidden_size_in, hidden_size_mid),
              nn.ReLU(),
              nn.Linear(hidden_size_mid, hidden_size_out),
-             ) for _ in range(num_layers)]).to(device).to(ptdtype)
+             ) for _ in range(num_layers_q)]).to(device).to(ptdtype)
     #mlps.load_state_dict(torch.load(os.path.join(args.qmodel, 'mlps.pt')))
     #sigmas = torch.zeros(num_layers).to(ptdtype).to(device)
     sigmas = torch.nn.Parameter(sigmas)
     #import pdb; pdb.set_trace()
     #optimizer = torch.optim.AdamW([sigmas] + list(model.parameters())+list(model_q.parameters()), lr=args.lr)
-    #for p in model_q.parameters():
-    #    p.requires_grad = False
+    for p in model_q.parameters():
+        p.requires_grad = False
     sigmas.requires_grad = False
     #optimizer = torch.optim.AdamW([sigmas] + list(model.parameters()) + list(mlp.parameters()), lr=args.lr)
     #optimizer = torch.optim.AdamW(list(model.parameters()) + list(mlp.parameters()), lr=args.lr)
-    optimizer = torch.optim.AdamW(list(model.parameters()) + list(mlps.parameters()) + list(model_q.parameters()), lr=args.lr)
+    #optimizer = torch.optim.AdamW(list(model.parameters()) + list(mlps.parameters()) + list(model_q.parameters()), lr=args.lr)
+    optimizer = torch.optim.AdamW(list(model.parameters()) + list(mlps.parameters()), lr=args.lr)
     #optimizer = torch.optim.AdamW([sigmas] + list(model.parameters())+list(model_q.parameters()), lr=args.lr)
     #optimizer_sigmas = torch.optim.SGD([sigmas], lr=args.lr)
     #optimizer = torch.optim.SGD([sigmas] + list(model.parameters())+list(model_q.parameters()), lr=args.lr)
@@ -298,7 +374,7 @@ def main():
     #print (f'Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
     model.eval()
     model_q.eval()
-    ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, accuracy = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode)
+    ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, accuracy = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.residual==1, args.follow)
     print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}")
     #model.train()
     #model_q.train()
@@ -339,15 +415,39 @@ def main():
                     try:
                         last_id = mask_id_list[first_id:].index(True) + first_id
                     except ValueError:
-                        last_id = len(mask_id_list)
+                        if args.follow == 'diagonal_orig':
+                            last_id = len(mask_id_list)
+                        elif args.follow == 'diagonal':
+                            last_id = len(mask_id_list)
+                        else:
+                            last_id = len(mask_id_list) - 1
+                            last_id -= 1
 
                     ##layers = torch.arange(start=0, end=num_layers+1)
 
                     layers = torch.arange(start=0, end=num_layers)
-                    ids = torch.round(first_id + layers * (last_id - 1 - first_id) / (num_layers))
+                    #import pdb; pdb.set_trace()
+                    if args.follow == 'diagonal':
+                        ids = torch.round(first_id + layers * (last_id - 1 - first_id) / (num_layers-1))
+                    elif args.follow == 'diagonal_orig': # todo: rerun experiments with new setting, but don't think this would change things much
+                        ids = torch.round(first_id + layers * (last_id - 1 - first_id) / (num_layers))
+                    elif args.follow == 'first_column':
+                        ids = torch.round(first_id + 0 * layers * (last_id - 1 - first_id) / (num_layers-1))
+                    elif args.follow == 'last_column':
+                        ids = torch.round(last_id-1 + 0 * layers * (last_id - 1 - first_id) / (num_layers-1))
+                    elif args.follow == 'top_row':
+                        ids = torch.round(first_id + layers * (last_id - 1 - first_id) / (num_layers-1))
+                    elif args.follow == 'bottom_row':
+                        ids = torch.round(first_id + layers * (last_id - 1 - first_id) / (num_layers-1))
+                    else:
+                        assert False
                     if step == 0 and batch_id == 0:
                         print ('first id', first_id, 'last_id', last_id)
                         print ('ids', ids)
+                        if args.follow != 'diagonal_orig':
+                            print ('WARNING: last id is manually subtracting 1 to remove the trailing space!')
+                        else:
+                            print ('WARNING: future experiments should try to use fixed setting!')
                     relevant_ids[batch_id] = ids
                 #import pdb; pdb.set_trace()
 
@@ -355,7 +455,14 @@ def main():
                 hidden_state_relevant_list = []
                 zs0 = []
                 for i, hidden_states in enumerate(hidden_states_cot[:-1]):
-                    hidden_state_relevant = mlps[i](hidden_states.gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                    if args.follow == 'diagonal' or args.follow == 'diagonal_orig' or args.follow == 'first_column' or args.follow == 'last_column':
+                        hidden_state_relevant = mlps[i](hidden_states.gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                    elif args.follow == 'top_row':
+                        hidden_state_relevant = mlps[i](hidden_states_cot[-2].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                    elif args.follow == 'bottom_row':
+                        hidden_state_relevant = mlps[i](hidden_states_cot[0].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                    else:
+                        assert False
                     zs0.append(hidden_state_relevant)
                     #hidden_state_relevant_list.append(hidden_state_relevant + torch.randn_like(hidden_state_relevant) * sigmas[i])
                     hidden_state_relevant_list.append(hidden_state_relevant)
@@ -363,8 +470,10 @@ def main():
                 ###for hidden_states in hidden_states_cot:
                 ###    hidden_states[mask] = 0 # batch_size, seq_len, hidden_size
                 zs = hidden_state_relevant_list
-
-                outputs_nocot = model.forward_zs(input_ids=input_ids_nocot, zs=hidden_state_relevant_list, first_ids=first_ids)
+                #import pdb; pdb.set_trace()
+                zs_model = [None for _ in range(num_layers_p)]
+                set_relevant_zs(args.mode, zs_model, zs)
+                outputs_nocot = model.forward_zs(input_ids=input_ids_nocot, zs=zs_model, first_ids=first_ids, residual=args.residual==1)
                 #outputs_nocot = model.forward_zs_attn(input_ids=input_ids_nocot, attended_to=hidden_states_cot, attended_to_mask=~mask, first_ids=first_ids, sigmas=sigmas)
                 zs_p = outputs_nocot.zs_p
                 zs_q = zs0 #outputs_nocot.zs_q
@@ -396,7 +505,7 @@ def main():
 
             if step % args.accumulate == args.accumulate-1:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
-                torch.nn.utils.clip_grad_norm_(model_q.parameters(), args.max_grad_norm)
+                #torch.nn.utils.clip_grad_norm_(model_q.parameters(), args.max_grad_norm)
                 torch.nn.utils.clip_grad_norm_(mlps.parameters(), args.max_grad_norm)
                 #torch.nn.utils.clip_grad_norm_([sigmas], args.max_grad_norm)
                 optimizer.step()
@@ -420,7 +529,7 @@ def main():
     #    accuracy, word_accuracy, ppl = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas)
         #ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode)
         #print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Accuracy: {accuracy}")
-        ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, accuracy = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode)
+        ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, accuracy = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.residual==1, args.follow)
         print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}")
         #print (f'Epoch {epoch}. Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
         #print ('sigmas', sigmas)
