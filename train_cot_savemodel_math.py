@@ -104,7 +104,7 @@ def evaluate(model, dataloader, tokenizer, ctx, beam_size=5):
                 if ans == pred_ans:
                     total_correct += 1
                 i += 1
-            break
+            #break
 
         word_accuracy = word_correct / total
         accuracy = total_correct / total_instances
@@ -119,6 +119,7 @@ def main():
     parser.add_argument('--val_path', type=str, default='data/math_scaffolding/src1_valid.txt')
     parser.add_argument('--test_path', type=str, default='data/math_scaffolding/src1_test.txt')
     parser.add_argument('--epochs', type=int, default=5)
+    parser.add_argument('--compile', type=int, default=1)
     parser.add_argument('--batch_size', type=int, default=5)
     parser.add_argument('--lr', type=float, default=5e-5)
     parser.add_argument('--max_grad_norm', type=float, default=1.0)
@@ -141,7 +142,10 @@ def main():
     ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
     print (ptdtype, dtype, beam_size)
     model = AutoModelForCausalLM.from_pretrained(args.model).to(device).to(ptdtype)
-    model = torch.compile(model)
+    if args.compile == 1:
+        model = torch.compile(model)
+    else:
+        print ('WARNING: no compile!')
     # TODO: maybe use pretrained model here?
     #model.apply(model._init_weights)
     use_fused = True 
