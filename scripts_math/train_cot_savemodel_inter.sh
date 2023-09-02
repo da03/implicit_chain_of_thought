@@ -1,4 +1,4 @@
-for MODEL in gpt2 gpt2-medium gpt2-large
+for MODEL in gpt2-large
 do
     for D in scaffolding_formula scaffolding_formula_with_spaces
     do
@@ -9,7 +9,9 @@ do
         export BSZ=32
         #export D=scaffolding_formula
         export FOLDER=math_${D}
-        export SAVE=math_${D}_cot_${MODEL}
+        export MODELSAVE="${MODEL////_}"
+        export SAVE=math_${D}_cot_${MODELSAVE}
+        echo $SAVE
         mkdir $SAVE
         TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python train_cot_savemodel_math.py \
             --train_path data/${FOLDER}/src1_train.txt \
@@ -17,10 +19,10 @@ do
             --test_path data/${FOLDER}/src1_test.txt \
             --epochs $EPOCHS \
             --lr $LR \
-            --model $MODEL \
+            --model $MODELSAVE \
             --batch_size $BSZ \
             --save_model $SAVE \
             --compile 0 \
-            > ${SAVE}/log.train.text.model${MODEL}.folder${FOLDER}.e${EPOCHS}.lr${LR}.${BSZ} 2>&1
+            > ${SAVE}/log.train.text.model${MODELSAVE}.folder${FOLDER}.e${EPOCHS}.lr${LR}.${BSZ} 2>&1
     done
 done
