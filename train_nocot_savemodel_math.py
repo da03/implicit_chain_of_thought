@@ -7,7 +7,7 @@ import argparse
 import os
 import sys
 import tqdm
-from data import CoTDataset, DataCollator
+from data import NoCoTDataset, DataCollator
 import logging
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -93,15 +93,15 @@ def evaluate(model, dataloader, tokenizer, ctx, beam_size=5):
             #for input_ids_single, beam_output_i in zip(input_ids, beam_output):
                 #tgt = tgt[:sep_id]
                 tgt_text = tokenizer.decode(tgt, skip_special_tokens=True)
-                ans = extract_answer(tgt_text)
+                ans = tgt_text.strip()
                 pred_text = tokenizer.decode(beam_output[0][sep_id+1:], skip_special_tokens=True)
                 if i == 0:
                     #print ("Output:\n" + 100 * '-')
                     #print (pred_text)
                     print ("\n" + 100 * '-')
-                    print ('GT:', tokenizer.decode(input_ids_single, skip_special_tokens=True))
+                    print ('GT:', tokenizer.decode(input_ids_single))
                     print ('Predicted:', pred_text)
-                pred_ans = extract_answer(pred_text) #.split()[-1] #extract_answer(pred_text)
+                pred_ans = pred_text.strip() #.split()[-1] #extract_answer(pred_text)
                 #import pdb; pdb.set_trace()
                 if ans == pred_ans:
                     total_correct += 1
@@ -140,7 +140,6 @@ def main():
     else:
         dtype = 'float32'
         beam_size = 1
-    #beam_size = 1
     ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
     print (ptdtype, dtype, beam_size)
     model = AutoModelForCausalLM.from_pretrained(args.model).to(device).to(ptdtype)
@@ -150,15 +149,17 @@ def main():
         print ('WARNING: no compile!')
     # TODO: maybe use pretrained model here?
     #model.apply(model._init_weights)
+    #optimizer = AdamW(model.parameters(), lr=args.lr)
+    # Create AdamW optimizer and use the fused version if it is available
+    #fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
     use_fused = True 
     extra_args = dict(fused=True) if use_fused else dict()
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, **extra_args)
-    #optimizer = AdamW(model.parameters(), lr=args.lr)
 
     collate_fn = DataCollator(tokenizer)
-    train_dataset = CoTDataset(tokenizer, args.train_path, 1024)
+    train_dataset = NoCoTDataset(tokenizer, args.train_path, 1024)
     train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True)
-    val_dataset = CoTDataset(tokenizer, args.val_path, 1024)
+    val_dataset = NoCoTDataset(tokenizer, args.val_path, 1024)
     val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True)
 
     torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
@@ -173,7 +174,6 @@ def main():
         model.save_pretrained(model_dir)
         tokenizer.save_pretrained(model_dir)
 
-    #import pdb; pdb.set_trace()
     for epoch in range(args.epochs):
         save_model(model, tokenizer, f'{args.save_model}/checkpoint_{epoch}_{args.lr}_{args.model}')
         print(f"Epoch {epoch}") #TODO change epoch

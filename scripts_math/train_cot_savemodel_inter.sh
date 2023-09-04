@@ -1,4 +1,4 @@
-for MODEL in gpt2-large
+for MODEL in xhyi/PT_GPTNEO350_ATG
 do
     for D in scaffolding_formula scaffolding_formula_with_spaces
     do
@@ -13,13 +13,13 @@ do
         export SAVE=math_${D}_cot_${MODELSAVE}
         echo $SAVE
         mkdir $SAVE
-        TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python train_cot_savemodel_math.py \
+        TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=1 stdbuf -oL -eL python train_cot_savemodel_math.py \
             --train_path data/${FOLDER}/src1_train.txt \
             --val_path data/${FOLDER}/src1_valid.txt \
             --test_path data/${FOLDER}/src1_test.txt \
             --epochs $EPOCHS \
             --lr $LR \
-            --model $MODELSAVE \
+            --model $MODEL \
             --batch_size $BSZ \
             --save_model $SAVE \
             --compile 0 \
