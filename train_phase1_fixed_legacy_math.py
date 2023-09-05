@@ -47,6 +47,8 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode, fol
         total_loss = 0
         total_loss_nll = 0
         total_loss_kl = 0
+        num_layers = len(model.transformer.h)
+        total_loss_kls = torch.zeros(num_layers)
         total_instances = 0
         for batch in tqdm.tqdm(dataloader):
             input_ids_cot = batch['input_ids_cot'].to(device)
@@ -131,8 +133,12 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode, fol
             loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
             kl = 0.
             zs_p = get_relevant_zs(zs_p, zs_q, mode)
+            kl_i = 0
             for z, zp, sigma_i, mlp in zip(zs_q, zs_p, sigmas, mlps):
-                kl += ((z-mlp(zp))*(z-mlp(zp))).sum() / sigma_i / sigma_i / 2 / labels_nocot[..., 1:].ge(0).sum().item()
+                kl_item = ((z-mlp(zp))*(z-mlp(zp))).sum() / sigma_i / sigma_i / 2 / labels_nocot[..., 1:].ge(0).sum().item()
+                kl += kl_item
+                total_loss_kls[kl_i] += kl_item.item() * labels_nocot[...,1:].ge(0).sum().item()
+                kl_i += 1
             total_loss += (loss.item() + kl.item()) * labels_nocot[...,1:].ge(0).sum().item()
             total_loss_kl += kl.item() * labels_nocot[...,1:].ge(0).sum().item()
             total_loss_nll += loss.item() * labels_nocot[...,1:].ge(0).sum().item()
@@ -195,7 +201,8 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode, fol
         loss_nll = total_loss_nll / total
         ppl_nll = math.exp(loss_nll)
         loss_kl = total_loss_kl / total
-    return ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy
+        loss_kls = total_loss_kls / total
+    return ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, loss_kls
 
 def get_relevant_zs(zs_p, zs_q, mode):
     #import pdb; pdb.set_trace()
@@ -303,8 +310,10 @@ def main():
 
     #accuracy, word_accuracy, ppl = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas)
     #print (f'Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
-    ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.follow, mlps_patch)
+    ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy, loss_kls = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.follow, mlps_patch)
     print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Accuracy: {accuracy}")
+    loss_kls = [ '%.2f' % elem for elem in loss_kls.tolist() ]
+    print (loss_kls)
     #model.train()
     #model_q.train()
     model.eval()
@@ -419,9 +428,14 @@ def main():
             kl = 0.
             #import pdb; pdb.set_trace()
             zs_p = get_relevant_zs(zs_p, zs_q, args.mode)
+            kls = torch.zeros(num_layers)
+            kl_i = 0
             for z, zp, sigma_i, mlp in zip(zs_q, zs_p, sigmas, mlps):
                 #kl += ((z-zp)*(z-zp)).sum() / sigma_i / sigma_i / 2 / total
-                kl += ((z-mlp(zp))*(z-mlp(zp))).sum() / sigma_i / sigma_i / 2 / total
+                kl_item = ((z-mlp(zp))*(z-mlp(zp))).sum() / sigma_i / sigma_i / 2 / total
+                kl += kl_item
+                kls[kl_i] += kl_item.item()
+                kl_i += 1
 
 
             shift_logits = logits[..., :-1, :].contiguous()
@@ -451,13 +465,16 @@ def main():
             ppl0 = math.exp(nll.item())
             if step % 100 == 0:
                 print (f"Step: {step}. PPL: {ppl}. Loss: {loss}. PPL0: {ppl0}. NLL: {nll}. KL: {kl}. Accuracy: {accuracy}")
-                print (sigmas)
+                kls = [ '%.2f' % elem for elem in kls.tolist() ]
+                print (kls)
                 sys.stdout.flush()
             step += 1
     #    accuracy, word_accuracy, ppl = evaluate(model, model_q, train_dataloader, tokenizer, ctx, sigmas)
     #    accuracy, word_accuracy, ppl = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas)
-        ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.follow, mlps_patch)
+        ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy, loss_kls = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.follow, mlps_patch)
         print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Accuracy: {accuracy}")
+        loss_kls = [ '%.2f' % elem for elem in loss_kls.tolist() ]
+        print (loss_kls)
         #print (f'Epoch {epoch}. Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
         #print ('sigmas', sigmas)
         sys.stdout.flush()

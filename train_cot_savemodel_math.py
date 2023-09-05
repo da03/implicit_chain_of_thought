@@ -27,7 +27,7 @@ def extract_answer(text):
         ans = ans.strip().replace(',', '')
         return ans
 
-def evaluate(model, dataloader, tokenizer, ctx, beam_size=5):
+def evaluate(model, dataloader, tokenizer, ctx, beam_size=5, use_max=False):
     with torch.no_grad():
         total = 0
         word_correct = 0
@@ -63,6 +63,8 @@ def evaluate(model, dataloader, tokenizer, ctx, beam_size=5):
                 tgt = input_ids_single[sep_id+1:]
                 max_new_tokens = tgt.size(0)+10
                 max_new_tokens = tgt[tgt.ne(tokenizer.eos_token_id)].size(0)+10
+                if not use_max:
+                    max_new_tokens = 300
                 beam_output = model.generate(
                     input_ids=input_ids_single[:sep_id+1].unsqueeze(0),
                     max_new_tokens=max_new_tokens,
@@ -164,7 +166,7 @@ def main():
     torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
     torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
     ctx = torch.amp.autocast(device_type='cuda', dtype=ptdtype)
-    accuracy, word_accuracy, ppl = evaluate(model, val_dataloader, tokenizer, ctx, beam_size)
+    accuracy, word_accuracy, ppl = evaluate(model, val_dataloader, tokenizer, ctx, beam_size, use_max=True)
     print (f'Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
     model.train()
     step = 0
