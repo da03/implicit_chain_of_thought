@@ -76,7 +76,7 @@ def extract_answer(text):
     ans = text.strip().replace(',', '')
     return ans
 
-def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode, residual=False, follow=None):
+def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode, residual=False, follow=None, use_max=False):
     with torch.no_grad():
         model.eval()
         model_q.eval()
@@ -201,6 +201,8 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode, res
                 max_new_tokens = tgt.size(0)+10
                 max_new_tokens = tgt[tgt.ne(tokenizer.eos_token_id)].size(0)+10
                 beam_size = 5
+                if not use_max:
+                    max_new_tokens = 300
                 beam_output = model.generate(
                     input_ids=input_ids_single[:sep_id+1].unsqueeze(0),
                     max_new_tokens=max_new_tokens,
@@ -386,7 +388,7 @@ def main():
     #print (f'Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
     model.eval()
     model_q.eval()
-    ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, accuracy = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.residual==1, args.follow)
+    ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, accuracy = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.residual==1, args.follow, use_max=True)
     print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}")
     #model.train()
     #model_q.train()
