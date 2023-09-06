@@ -21,7 +21,7 @@ do
             --lr $LR \
             --model $MODEL \
             --batch_size $BSZ \
-            --save_model $SAVE \
+            --save_model /n/holyscratch01/rush_lab/Users/yuntian/implicit/$SAVE \
             --compile 0 \
             > ${SAVE}/log.train.text.model${MODELSAVE}.folder${FOLDER}.e${EPOCHS}.lr${LR}.${BSZ} 2>&1&
     done
