@@ -171,6 +171,7 @@ def main():
     model.train()
     step = 0
     def save_model(model, tokenizer, model_dir):
+        print ('saving', model_dir)
         os.makedirs(model_dir, exist_ok=True)
         model.save_pretrained(model_dir)
         tokenizer.save_pretrained(model_dir)
