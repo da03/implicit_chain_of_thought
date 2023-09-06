@@ -123,7 +123,7 @@ def construct_prompt(num_shot, examples):
     return context
 
 
-def main(output_dir, model, temperature, max_tokens, seed, num_shot, num_prompts, input_formula_dir, output_formula_dir):
+def main(output_dir, model, temperature, max_tokens, seed, num_shot, num_prompts, input_formula_dir, output_formula_dir, input_none_dir, output_none_dir):
     random.seed(seed)
     train_filename = 'processed_gsm8k/train.jsonl'
     examples = []
@@ -173,6 +173,14 @@ def main(output_dir, model, temperature, max_tokens, seed, num_shot, num_prompts
         for line in fin:
             train_lines.append(line.strip())
 
+    train_none_lines = []
+    os.makedirs(output_none_dir, exist_ok=True)
+    for split in ['valid', 'test']:
+        shutil.copy(os.path.join(input_none_dir, f'src1_{split}.txt'), os.path.join(output_none_dir, f'src1_{split}.txt'))
+    with open(os.path.join(input_none_dir, 'src1_train.txt')) as fin:
+        for line in fin:
+            train_none_lines.append(line.strip())
+
     WRITE_RESULTS = True
     if WRITE_RESULTS:
         start_time = time.time()  # Current time in seconds
@@ -204,6 +212,7 @@ def main(output_dir, model, temperature, max_tokens, seed, num_shot, num_prompts
                         except Exception as e:
                             continue
                         train_lines.append(question.strip() + '||' + formulas_str + f' #### {ans}')
+                        train_none_lines.append(question.strip() + '||' + f'#### {ans}')
         end_time = time.time()  # Current time in seconds after code execution
         execution_time_seconds = end_time - start_time
         execution_time_minutes = execution_time_seconds / 60
@@ -214,6 +223,13 @@ def main(output_dir, model, temperature, max_tokens, seed, num_shot, num_prompts
         with open(os.path.join(output_formula_dir, 'src1_train.txt'), 'w') as fout:
             for line in train_lines:
                 fout.write(line + '\n')
+
+        random.seed(1234)
+        random.shuffle(train_none_lines)
+        with open(os.path.join(output_none_dir, 'src1_train.txt'), 'w') as fout:
+            for line in train_none_lines:
+                fout.write(line + '\n')
+
 
 
 
@@ -235,6 +251,8 @@ def parse_arguments():
     parser.add_argument("--output_dir", type=str, default="output", help="Output folder")
     parser.add_argument("--input_formula_dir", type=str, default="data/math_scaffolding_formula", help="Output folder")
     parser.add_argument("--output_formula_dir", type=str, default="data/augmented_math_scaffolding_formula", help="Output folder")
+    parser.add_argument("--input_none_dir", type=str, default="data/math_scaffolding_none", help="Output folder")
+    parser.add_argument("--output_none_dir", type=str, default="data/augmented_math_scaffolding_none", help="Output folder")
     return parser.parse_args()
 
 
@@ -249,4 +267,6 @@ if __name__ == "__main__":
          num_shot=args.num_shot, \
          num_prompts=args.num_prompts, \
          input_formula_dir=args.input_formula_dir, \
-         output_formula_dir=args.output_formula_dir)
+         output_formula_dir=args.output_formula_dir, \
+         input_none_dir=args.input_none_dir, \
+         output_none_dir=args.output_none_dir)
