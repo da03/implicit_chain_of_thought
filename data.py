@@ -265,8 +265,9 @@ class NoCoTDataset(Dataset):
         lines_out = []
         #import pdb; pdb.set_trace()
         for first, second in lines:
-            items = second.split(' #### ')
-            ans = items[-1].strip()
+            #items = second.split(' #### ')
+            #ans = items[-1].strip()
+            ans = extract_answer(second)
             #lines_out.append((first, f'#### {ans}'))
             lines_out.append((first, f'{ans}'))
         lines = lines_out

@@ -157,14 +157,15 @@ def main(output_dir, model, temperature, max_tokens, seed, num_shot, num_prompts
     with open(prompt_filename) as fin:
         for line in fin:
             prompts.append(json.loads(line.strip()))
-    prompts = prompts[1000:10000]
+    #prompts = prompts[1000:10000]
+    prompts = prompts[10000:20000]
     #prompts = prompts[:10]
 
 
     combinations = [(prompt, model, temperature, max_tokens) for prompt in prompts]
     with Pool(30) as pool:
-        results = list(tqdm.tqdm(pool.imap(parallel_function, combinations), total=len(combinations)))
-        #pool.map(parallel_function, combinations)
+        #results = list(tqdm.tqdm(pool.imap(parallel_function, combinations), total=len(combinations)))
+        pool.map(parallel_function, combinations)
 
     WRITE_RESULTS = True
     if WRITE_RESULTS:
