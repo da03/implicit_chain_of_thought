@@ -3,16 +3,10 @@ import shutil
 import hashlib
 import numpy as np
 import time
-import sys, os, json, random, argparse, openai
+import sys, os, json, random, argparse
 import tiktoken
 import tqdm
 from multiprocessing import Pool
-
-from tenacity import (
-    retry,
-    wait_exponential,
-    stop_after_attempt,
-)
 
 
 import sqlite3
@@ -66,12 +60,12 @@ def get_completion_with_cache(prompt, model, temperature, max_tokens):
         prompt, completion = result
     return completion
 
-@retry(wait=wait_exponential(min=1, max=1200), stop=stop_after_attempt(12))
+#@retry(wait=wait_exponential(min=1, max=1200), stop=stop_after_attempt(12))
 def completion_with_backoff(**kwargs):
     return openai.Completion.create(**kwargs)
 
 
-@retry(wait=wait_exponential(min=1, max=1200), stop=stop_after_attempt(12))
+#@retry(wait=wait_exponential(min=1, max=1200), stop=stop_after_attempt(12))
 def chatcompletion_with_backoff(**kwargs):
     return openai.ChatCompletion.create(**kwargs)
 
