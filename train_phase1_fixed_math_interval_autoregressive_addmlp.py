@@ -26,18 +26,18 @@ logging.disable(logging.WARNING) # disable WARNING, INFO and DEBUG logging every
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
-def save_model(model, tokenizer, model_dir):
+def save_model(model, mlps, tokenizer, model_dir):
     print ('saving', model_dir)
     os.makedirs(model_dir, exist_ok=True)
     model.save_pretrained(model_dir)
     tokenizer.save_pretrained(model_dir)
-    #torch.save(mlps.state_dict(), os.path.join(model_dir, 'mlps.pt'))
+    torch.save(mlps.state_dict(), os.path.join(model_dir, 'mlps.pt'))
 
 def extract_answer(text):
     ans = text.strip().replace(',', '')
     return ans
 
-def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mode, follow=None, mlps_patch=None, interval_arg=-1):
+def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode, follow=None, interval_arg=-1):#, mlps_patch=None):
     with torch.no_grad():
         model.eval()
         model_q.eval()
@@ -113,11 +113,11 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mode, follow=No
                 zs0 = []
                 for i, hidden_states in enumerate(hidden_states_cot[:-1]):
                     if follow == 'diagonal' or follow == 'diagonal_orig' or follow == 'first_column' or follow == 'last_column':
-                        hidden_state_relevant = mlps_patch[i](hidden_states.gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                        hidden_state_relevant = (hidden_states.gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
                     elif follow == 'top_row':
-                        hidden_state_relevant = mlps_patch[i](hidden_states_cot[-2].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                        hidden_state_relevant = (hidden_states_cot[-2].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
                     elif follow == 'bottom_row':
-                        hidden_state_relevant = mlps_patch[i](hidden_states_cot[0].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                        hidden_state_relevant = (hidden_states_cot[0].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
                     else:
                         assert False
                     zs0.append(hidden_state_relevant)
@@ -135,9 +135,8 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mode, follow=No
             kl = 0.
             zs_p = get_relevant_zs(zs_p, zs_q, mode)
             kl_i = 0
-            for z, zp, sigma_i in zip(zs_q, zs_p, sigmas):
-                #import pdb; pdb.set_trace()
-                kl_item = ((z-zp)*(z-zp)).sum() / sigma_i / sigma_i / 2 / labels_nocot[..., 1:].ge(0).sum().item()
+            for z, zp, sigma_i, mlp in zip(zs_q, zs_p, sigmas, mlps):
+                kl_item = ((z-mlp(zp))*(z-mlp(zp))).sum() / sigma_i / sigma_i / 2 / labels_nocot[..., 1:].ge(0).sum().item()
                 kl += kl_item
                 total_loss_kls[kl_i] += kl_item.item() * labels_nocot[...,1:].ge(0).sum().item()
                 kl_i += 1
@@ -234,12 +233,11 @@ def main():
     parser.add_argument('--model', type=str, default='gpt2')
     parser.add_argument('--save_model', type=str, default='model_nocot')
     parser.add_argument('--qmodel', type=str, default='gpt2')
-    parser.add_argument('--amodel', type=str, default='gpt2')
     parser.add_argument('--residual', type=int, default=0)
     parser.add_argument('--mode', type=str, choices=['top', 'interleave', 'bottom', 'none'], default='none')
     parser.add_argument('--compile', type=int, default=1)
     parser.add_argument('--interval', type=int, default=-1)
-    parser.add_argument('--follow', type=str, choices=['diagonal', 'last_column', 'top_row', 'bottom_row', 'first_column', 'diagonal_orig'], default='diagonal')
+    parser.add_argument('--follow', type=str, choices=['diagonal_orig', 'diagonal', 'last_column', 'top_row', 'bottom_row', 'first_column'], default='diagonal')
     args = parser.parse_args()
 
     print (args)
@@ -271,31 +269,30 @@ def main():
     hidden_size_in = model.config.hidden_size
     hidden_size_out = model_q.config.hidden_size
     hidden_size_mid = 4 * max(hidden_size_in, hidden_size_out)
-    #mlps = nn.ModuleList([nn.Sequential(
-    #         nn.Linear(hidden_size_in, hidden_size_mid),
-    #         nn.ReLU(),
-    #         nn.Linear(hidden_size_mid, hidden_size_out),
-    #         ) for _ in range(num_layers)]).to(device).to(ptdtype)
-    mlps_patch = nn.ModuleList([nn.Sequential(
+    mlps = nn.ModuleList([nn.Sequential(
              nn.Linear(hidden_size_in, hidden_size_mid),
              nn.ReLU(),
              nn.Linear(hidden_size_mid, hidden_size_out),
              ) for _ in range(num_layers)]).to(device).to(ptdtype)
-    mlps_patch.load_state_dict(torch.load(os.path.join(args.amodel, 'mlps.pt')))
+    #mlps_patch = nn.ModuleList([nn.Sequential(
+    #         nn.Linear(hidden_size_in, hidden_size_mid),
+    #         nn.ReLU(),
+    #         nn.Linear(hidden_size_mid, hidden_size_out),
+    #         ) for _ in range(num_layers)]).to(device).to(ptdtype)
+    #mlps_patch.load_state_dict(torch.load(os.path.join(args.qmodel, 'mlps.pt')))
     #sigmas = torch.zeros(num_layers).to(ptdtype).to(device)
     sigmas = torch.nn.Parameter(sigmas)
     #import pdb; pdb.set_trace()
     #optimizer = torch.optim.AdamW([sigmas] + list(model.parameters())+list(model_q.parameters()), lr=args.lr)
     for p in model_q.parameters():
         p.requires_grad = False
-    for p in mlps_patch.parameters():
-        p.requires_grad = False
+    #for p in mlps_patch.parameters():
+    #    p.requires_grad = False
     sigmas.requires_grad = False
     #optimizer = torch.optim.AdamW([sigmas] + list(model.parameters()) + list(mlp.parameters()), lr=args.lr)
     use_fused = True 
     extra_args = dict(fused=True) if use_fused else dict()
-    #optimizer = torch.optim.AdamW(list(model.parameters()) + list(mlps.parameters()), lr=args.lr, **extra_args)
-    optimizer = torch.optim.AdamW(list(model.parameters()), lr=args.lr, **extra_args)
+    optimizer = torch.optim.AdamW(list(model.parameters()) + list(mlps.parameters()), lr=args.lr, **extra_args)
     #optimizer_sigmas = torch.optim.SGD([sigmas], lr=args.lr)
     #optimizer = torch.optim.SGD([sigmas] + list(model.parameters())+list(model_q.parameters()), lr=args.lr)
 
@@ -314,7 +311,7 @@ def main():
 
     #accuracy, word_accuracy, ppl = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas)
     #print (f'Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
-    ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy, loss_kls = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, args.mode, args.follow, mlps_patch, interval_arg=args.interval)
+    ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy, loss_kls = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.follow, interval_arg=args.interval)#, mlps_patch)
     print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Accuracy: {accuracy}")
     loss_kls = [ '%.2f' % elem for elem in loss_kls.tolist() ]
     print (loss_kls)
@@ -328,7 +325,7 @@ def main():
     step = 0
     #import pdb; pdb.set_trace()
     for epoch in range(args.epochs):
-        save_model(model, tokenizer, f'{args.save_model}/checkpoint_{epoch}_{args.lr}')
+        save_model(model, mlps, tokenizer, f'{args.save_model}/checkpoint_{epoch}_{args.lr}')
         print(f"Epoch {epoch}") #TODO change epoch
 
         #model.save_pretrained("finetuned_gpt2")
@@ -402,11 +399,11 @@ def main():
                 zs0 = []
                 for i, hidden_states in enumerate(hidden_states_cot[:-1]):
                     if args.follow == 'diagonal' or args.follow == 'diagonal_orig' or args.follow == 'first_column' or args.follow == 'last_column':
-                        hidden_state_relevant = mlps_patch[i](hidden_states.gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                        hidden_state_relevant = (hidden_states.gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
                     elif args.follow == 'top_row':
-                        hidden_state_relevant = mlps_patch[i](hidden_states_cot[-2].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                        hidden_state_relevant = (hidden_states_cot[-2].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
                     elif args.follow == 'bottom_row':
-                        hidden_state_relevant = mlps_patch[i](hidden_states_cot[0].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                        hidden_state_relevant = (hidden_states_cot[0].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
                     else:
                         assert False
                     zs0.append(hidden_state_relevant)
@@ -434,9 +431,9 @@ def main():
             zs_p = get_relevant_zs(zs_p, zs_q, args.mode)
             kls = torch.zeros(num_layers)
             kl_i = 0
-            for z, zp, sigma_i in zip(zs_q, zs_p, sigmas):
+            for z, zp, sigma_i, mlp in zip(zs_q, zs_p, sigmas, mlps):
                 #kl += ((z-zp)*(z-zp)).sum() / sigma_i / sigma_i / 2 / total
-                kl_item = ((z-zp)*(z-zp)).sum() / sigma_i / sigma_i / 2 / total
+                kl_item = ((z-mlp(zp))*(z-mlp(zp))).sum() / sigma_i / sigma_i / 2 / total
                 kl += kl_item
                 kls[kl_i] += kl_item.item()
                 kl_i += 1
@@ -455,7 +452,7 @@ def main():
             if step % args.accumulate == args.accumulate-1:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
                 #torch.nn.utils.clip_grad_norm_(model_q.parameters(), args.max_grad_norm)
-                #torch.nn.utils.clip_grad_norm_(mlps.parameters(), args.max_grad_norm)
+                torch.nn.utils.clip_grad_norm_(mlps.parameters(), args.max_grad_norm)
                 #torch.nn.utils.clip_grad_norm_([sigmas], args.max_grad_norm)
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
@@ -475,7 +472,7 @@ def main():
             step += 1
     #    accuracy, word_accuracy, ppl = evaluate(model, model_q, train_dataloader, tokenizer, ctx, sigmas)
     #    accuracy, word_accuracy, ppl = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas)
-        ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy, loss_kls = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, args.mode, args.follow, mlps_patch, interval_arg=args.interval)
+        ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy, loss_kls = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.follow, interval_arg=args.interval)#, mlps_patch)
         print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Accuracy: {accuracy}")
         loss_kls = [ '%.2f' % elem for elem in loss_kls.tolist() ]
         print (loss_kls)

@@ -3,7 +3,7 @@ import shutil
 import hashlib
 import numpy as np
 import time
-import sys, os, json, random, argparse, openai
+import sys, os, json, random, argparse
 import tiktoken
 import tqdm
 
