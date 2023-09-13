@@ -48,10 +48,14 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, rnn, mode
         total_loss = 0
         total_loss_nll = 0
         total_loss_kl = 0
+        total_loss_kl_pred = 0
         num_layers = len(model.transformer.h)
         total_loss_kls = torch.zeros(num_layers)
+        total_loss_kls_pred = torch.zeros(num_layers)
         total_loss_kls_mixture = torch.zeros(num_layers, mixture_size)
+        total_loss_kls_mixture_pred = torch.zeros(num_layers, mixture_size)
         total_loss_probs_mixture = torch.zeros(num_layers, mixture_size)
+        total_loss_ranks_mixture = torch.zeros(num_layers)
         total_instances = 0
         for batch in tqdm.tqdm(dataloader):
             input_ids_cot = batch['input_ids_cot'].to(device)
@@ -144,6 +148,7 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, rnn, mode
             loss_fct = CrossEntropyLoss()
             loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
             kl = 0.
+            kl_pred = 0.
             zs_p = get_relevant_zs(zs_p, zs_q, mode)
             kl_i = 0
             #import pdb; pdb.set_trace()
@@ -155,27 +160,35 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, rnn, mode
                 diff = zps_pred - z.unsqueeze(-1)
                 log_probs = torch.bmm(c.unsqueeze(1), zps_pred).squeeze(1).log_softmax(-1) # bsz, mixture_size
                 kls = (diff*diff).sum(1) / 2 # bsz, mixture_size
-                log_probs_sorted, ids_sorted = log_probs.sort(dim=-1, descending=True)
+                log_probs_sorted, ids_sorted_pred = log_probs.sort(dim=-1, descending=True)
                 probs_sorted = log_probs_sorted.exp() # bsz, mixture_size
-
 
                 if False:
                     kls = kls + log_probs
                     kl_item = torch.logsumexp(kls, dim=-1)
                 else:
-                    kl_item = kls.min(-1)[0]
+                    kl_item, kl_ids = kls.min(-1) # bsz
+                    log_probs_selected = log_probs.gather(1, kl_ids.view(-1, 1))
                     #ids_mixture[kl_i] = kl_ids
                     ids_sorted = kls.argsort(dim=-1, descending=False)
                 kls_sorted = kls.gather(1, ids_sorted)
+                kls_sorted_pred = kls.gather(1, ids_sorted_pred) # bsz, mixture_size
+                kl_item_pred = kls_sorted_pred[:, 0].sum() / labels_nocot[..., 1:].ge(0).sum().item()
+                probs_sorted = log_probs.gather(1, ids_sorted).exp()
                 total_loss_kls_mixture[kl_i] += kls_sorted.sum(0).cpu()
+                total_loss_kls_mixture_pred[kl_i] += kls_sorted_pred.sum(0).cpu()
                 total_loss_probs_mixture[kl_i] += probs_sorted.sum(0).cpu()
+                total_loss_ranks_mixture[kl_i] += ids_sorted_pred.eq(kl_ids.view(-1, 1)).float().argmax(-1).sum().cpu()
                 #kl_item = ((z-mlp(zp))*(z-mlp(zp))).sum() / sigma_i / sigma_i / 2 / labels_nocot[..., 1:].ge(0).sum().item()
                 kl_item = kl_item.sum() / labels_nocot[..., 1:].ge(0).sum().item()
                 kl += kl_item
+                kl_pred += kl_item_pred
                 total_loss_kls[kl_i] += kl_item.item() * labels_nocot[...,1:].ge(0).sum().item()
+                total_loss_kls_pred[kl_i] += kl_item_pred.item() * labels_nocot[...,1:].ge(0).sum().item()
                 kl_i += 1
             total_loss += (loss.item() + kl.item()) * labels_nocot[...,1:].ge(0).sum().item()
             total_loss_kl += kl.item() * labels_nocot[...,1:].ge(0).sum().item()
+            total_loss_kl_pred += kl_pred.item() * labels_nocot[...,1:].ge(0).sum().item()
             total_loss_nll += loss.item() * labels_nocot[...,1:].ge(0).sum().item()
 
             labels_pred = logits.argmax(-1)
@@ -237,9 +250,13 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, rnn, mode
         ppl_nll = math.exp(loss_nll)
         loss_kl = total_loss_kl / total
         loss_kls = total_loss_kls / total
+        loss_kl_pred = total_loss_kl_pred / total
+        loss_kls_pred = total_loss_kls_pred / total
         loss_kls_mixture = total_loss_kls_mixture / total
+        loss_kls_mixture_pred = total_loss_kls_mixture_pred / total
         loss_probs_mixture = total_loss_probs_mixture / total_instances
-    return ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, loss_kls, loss_kls_mixture, loss_probs_mixture
+        loss_ranks_mixture = total_loss_ranks_mixture / total_instances
+    return ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, loss_kls, loss_kls_mixture, loss_kls_mixture_pred, loss_probs_mixture, loss_ranks_mixture, loss_kl_pred, loss_kls_pred
 
 def get_relevant_zs(zs_p, zs_q, mode):
     #import pdb; pdb.set_trace()
@@ -351,15 +368,21 @@ def main():
 
     #accuracy, word_accuracy, ppl = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas)
     #print (f'Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
-    ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy, loss_kls, loss_kls_mixture, loss_probs_mixture = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, rnn, args.mode, args.follow, interval_arg=args.interval, mixture_size=args.mixture_size)#, mlps_patch)
-    print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Accuracy: {accuracy}")
+    ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy, loss_kls, loss_kls_mixture, loss_kls_mixture_pred, loss_probs_mixture, loss_ranks_mixture, loss_kl_pred, loss_kls_pred = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, rnn, args.mode, args.follow, interval_arg=args.interval, mixture_size=args.mixture_size)#, mlps_patch)
+    #return ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, loss_kls, loss_kls_mixture, loss_kls_mixture_pred, loss_probs_mixture, loss_ranks_mixture
+    print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Accuracy: {accuracy}. KL pred: {loss_kl_pred}")
     loss_kls = [ '%.2f' % elem for elem in loss_kls.tolist() ]
-    print (loss_kls)
-    for kl_i, (loss_prob_mixture, loss_kl_mixture) in enumerate(zip(loss_probs_mixture, loss_kls_mixture)):
+    print ('kls real', loss_kls)
+    loss_kls = [ '%.2f' % elem for elem in loss_kls_pred.tolist() ]
+    print ('kls pred', loss_kls)
+    for kl_i, (loss_prob_mixture, loss_rank_mixture, loss_kl_mixture, loss_kl_mixture_pred) in enumerate(zip(loss_probs_mixture, loss_ranks_mixture, loss_kls_mixture, loss_kls_mixture_pred)):
         loss_prob_mixture = [ '%.2f' % elem for elem in loss_prob_mixture.tolist() ]
         print (kl_i, loss_prob_mixture)
         loss_kl_mixture = [ '%.2f' % elem for elem in loss_kl_mixture.tolist() ]
-        print (kl_i, loss_kl_mixture)
+        print (kl_i, 'kl sorted', loss_kl_mixture)
+        loss_kl_mixture = [ '%.2f' % elem for elem in loss_kl_mixture_pred.tolist() ]
+        print (kl_i, 'kl pred', loss_kl_mixture)
+        print (kl_i, 'rank pred', loss_rank_mixture)
     #model.train()
     #model_q.train()
     model.eval()
@@ -482,8 +505,10 @@ def main():
             kls = torch.zeros(num_layers)
             mixture_size = args.mixture_size
             kls_mixture = torch.zeros(num_layers, mixture_size)
+            kls_mixture_pred = torch.zeros(num_layers, mixture_size)
             probs_mixture = torch.zeros(num_layers, mixture_size)
             ids_mixture = torch.zeros(num_layers, batch_size)
+            ids_mixture_pred = torch.zeros(num_layers, batch_size)
             kl_i = 0
             extra = 0
             for z, zp, sigma_i, mlp in zip(zs_q, zs_p, sigmas, mlps):
@@ -494,20 +519,28 @@ def main():
                 diff = zps_pred - z.unsqueeze(-1)
                 log_probs = torch.bmm(c.unsqueeze(1), zps_pred).squeeze(1).log_softmax(-1) # bsz, mixture_size
                 kls_ = (diff*diff).sum(1) / 2 # bsz, mixture_size
-                extra +=- 0.05 * (log_probs).sum() / batch_size
+                #import pdb; pdb.set_trace()
                 with torch.no_grad():
-                    log_probs_sorted, ids_sorted = log_probs.sort(dim=-1, descending=True)
+                    log_probs_sorted, ids_sorted_pred = log_probs.sort(dim=-1, descending=True)
                 if False:
                     kls_ = kls_ + log_probs
                     kl_item = torch.logsumexp(kls_, dim=-1)
+                    extra +=- 0.05 * (log_probs).sum() / batch_size
                 else:
-                    kl_item, kl_ids = kls_.min(-1)
+                    kl_item, kl_ids = kls_.min(-1) # bsz
                     ids_mixture[kl_i] = kl_ids
+                    ids_mixture_pred[kl_i] = ids_sorted_pred.eq(kl_ids.view(-1, 1)).float().argmax(-1)
                     ids_sorted = kls_.argsort(dim=-1, descending=False)
+                    log_probs_selected = log_probs.gather(1, kl_ids.view(-1, 1))
+                    extra += -0.1 * log_probs_selected.mean()
+                    extra += 0.01 * kls_.mean()
                 with torch.no_grad():
-                    probs_sorted = log_probs_sorted.exp() # bsz, mixture_size
+                    #probs_sorted = log_probs_sorted.exp() # bsz, mixture_size
                     kls_sorted = kls_.gather(1, ids_sorted)
+                    kls_sorted_pred = kls_.gather(1, ids_sorted_pred)
+                    probs_sorted = log_probs.gather(1, ids_sorted).exp()
                     kls_mixture[kl_i] = kls_sorted.sum(0).cpu() / total
+                    kls_mixture_pred[kl_i] = kls_sorted_pred.sum(0).cpu() / total
                     probs_mixture[kl_i] = probs_sorted.sum(0).cpu() / probs_sorted.shape[0]
 
                 #kl_item = ((z-mlp(zp))*(z-mlp(zp))).sum() / sigma_i / sigma_i / 2 / labels_nocot[..., 1:].ge(0).sum().item()
@@ -552,25 +585,43 @@ def main():
                 print (f"Step: {step}. PPL: {ppl}. Loss: {loss}. PPL0: {ppl0}. NLL: {nll}. KL: {kl}. Accuracy: {accuracy}")
                 kls = [ '%.2f' % elem for elem in kls.tolist() ]
                 print (kls)
-                for kl_i, (loss_prob_mixture, loss_kl_mixture, id_mixture) in enumerate(zip(probs_mixture, kls_mixture, ids_mixture)):
+                for kl_i, (loss_prob_mixture, loss_kl_mixture, loss_kl_mixture_pred, id_mixture, id_mixture_pred) in enumerate(zip(probs_mixture, kls_mixture, kls_mixture_pred, ids_mixture, ids_mixture_pred)):
                     loss_prob_mixture = [ '%.2f' % elem for elem in loss_prob_mixture.tolist() ]
                     print (kl_i, loss_prob_mixture)
                     loss_kl_mixture = [ '%.2f' % elem for elem in loss_kl_mixture.tolist() ]
-                    print (kl_i, loss_kl_mixture)
-                    print (kl_i, id_mixture)
+                    print (kl_i, 'min loss', loss_kl_mixture)
+                    loss_kl_mixture_pred = [ '%.2f' % elem for elem in loss_kl_mixture_pred.tolist() ]
+                    print (kl_i, 'pred loss', loss_kl_mixture_pred)
+                    print (kl_i, 'min component', id_mixture)
+                    print (kl_i, 'rank', id_mixture_pred)
                 sys.stdout.flush()
             step += 1
     #    accuracy, word_accuracy, ppl = evaluate(model, model_q, train_dataloader, tokenizer, ctx, sigmas)
     #    accuracy, word_accuracy, ppl = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas)
-        ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy, loss_kls, loss_kls_mixture, loss_probs_mixture = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, rnn, args.mode, args.follow, interval_arg=args.interval, mixture_size=args.mixture_size)#, mlps_patch)
-        print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Accuracy: {accuracy}")
+        #ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy, loss_kls, loss_kls_mixture, loss_probs_mixture = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, rnn, args.mode, args.follow, interval_arg=args.interval, mixture_size=args.mixture_size)#, mlps_patch)
+        #print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Accuracy: {accuracy}")
+        #loss_kls = [ '%.2f' % elem for elem in loss_kls.tolist() ]
+        #print (loss_kls)
+        #for kl_i, (loss_prob_mixture, loss_kl_mixture) in enumerate(zip(loss_probs_mixture, loss_kls_mixture)):
+        #    loss_prob_mixture = [ '%.2f' % elem for elem in loss_prob_mixture.tolist() ]
+        #    print (kl_i, loss_prob_mixture)
+        #    loss_kl_mixture = [ '%.2f' % elem for elem in loss_kl_mixture.tolist() ]
+        #    print (kl_i, loss_kl_mixture)
+        ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy, loss_kls, loss_kls_mixture, loss_kls_mixture_pred, loss_probs_mixture, loss_ranks_mixture, loss_kl_pred, loss_kls_pred = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, rnn, args.mode, args.follow, interval_arg=args.interval, mixture_size=args.mixture_size)#, mlps_patch)
+        #return ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, loss_kls, loss_kls_mixture, loss_kls_mixture_pred, loss_probs_mixture, loss_ranks_mixture
+        print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Accuracy: {accuracy}. KL pred: {loss_kl_pred}")
         loss_kls = [ '%.2f' % elem for elem in loss_kls.tolist() ]
-        print (loss_kls)
-        for kl_i, (loss_prob_mixture, loss_kl_mixture) in enumerate(zip(loss_probs_mixture, loss_kls_mixture)):
+        print ('kls real', loss_kls)
+        loss_kls = [ '%.2f' % elem for elem in loss_kls_pred.tolist() ]
+        print ('kls pred', loss_kls)
+        for kl_i, (loss_prob_mixture, loss_rank_mixture, loss_kl_mixture, loss_kl_mixture_pred) in enumerate(zip(loss_probs_mixture, loss_ranks_mixture, loss_kls_mixture, loss_kls_mixture_pred)):
             loss_prob_mixture = [ '%.2f' % elem for elem in loss_prob_mixture.tolist() ]
             print (kl_i, loss_prob_mixture)
             loss_kl_mixture = [ '%.2f' % elem for elem in loss_kl_mixture.tolist() ]
-            print (kl_i, loss_kl_mixture)
+            print (kl_i, 'kl sorted', loss_kl_mixture)
+            loss_kl_mixture = [ '%.2f' % elem for elem in loss_kl_mixture_pred.tolist() ]
+            print (kl_i, 'kl pred', loss_kl_mixture)
+            print (kl_i, 'rank pred', loss_rank_mixture)
         #print (f'Epoch {epoch}. Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
         #print ('sigmas', sigmas)
         sys.stdout.flush()
