@@ -319,6 +319,8 @@ def main():
     #         nn.Linear(hidden_size_mid, hidden_size_out),
     #         ) for _ in range(num_layers)]).to(device).to(ptdtype)
     #mlps_patch.load_state_dict(torch.load(os.path.join(args.qmodel, 'mlps.pt')))
+    rnn.load_state_dict(torch.load(os.path.join(args.model, 'rnn.pt')))
+    mlps.load_state_dict(torch.load(os.path.join(args.model, 'mlps.pt')))
     #sigmas = torch.zeros(num_layers).to(ptdtype).to(device)
     sigmas = torch.nn.Parameter(sigmas)
     #import pdb; pdb.set_trace()
@@ -487,6 +489,7 @@ def main():
             kl_i = 0
             extra = 0
             for z, zp, sigma_i, mlp in zip(zs_q, zs_p, sigmas, mlps):
+                import pdb; pdb.set_trace()
                 zps = mlp(zp) # bsz, hidden_size x  mixture_size+1
                 zps = zps.view(batch_size, hidden_size, -1)
                 zps_pred = zps[:, :, :-1] # bsz, hidden_size, mixture_size
