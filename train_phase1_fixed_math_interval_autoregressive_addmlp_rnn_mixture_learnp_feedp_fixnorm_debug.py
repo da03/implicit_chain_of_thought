@@ -38,7 +38,7 @@ def extract_answer(text):
     ans = text.strip().replace(',', '')
     return ans
 
-def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, rnn, mode, follow=None, interval_arg=-1, mixture_size=-1, feed='p', use='argmin'):#, mlps_patch=None):
+def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, rnn, mode, follow=None, interval_arg=-1, mixture_size=-1, feed='p', use='argmin', last_id_minus=0):#, mlps_patch=None):
     assert feed in ['p', 'q']
     if feed == 'p':
         assert use in ['argmin', 'pred']
@@ -98,12 +98,13 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, rnn, mode
                         else:
                             last_id = len(mask_id_list) - 1
                             last_id -= 1
+                    last_id = last_id - last_id_minus
 
                     ###layers = torch.arange(start=0, end=num_layers+1)
                     layers = torch.arange(start=0, end=num_layers)
                     a = first_id
                     #   ids = torch.round(first_id + layers * (last_id - 1 - first_id) / (num_layers))
-                    if follow == 'diagonal' or follow == 'top_row' or follow == 'bottom_row':
+                    if follow == 'diagonal' or follow == 'top_row' or follow == 'bottom_row' or follow == 'bottom_row_above':
                         interval = (last_id - 1 - first_id) / (num_layers-1)
                     elif follow == 'diagonal_orig': # todo: rerun experiments with new setting, but don't think this would change things much
                         interval = (last_id - 1 - first_id) / (num_layers)
@@ -132,6 +133,8 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, rnn, mode
                         hidden_state_relevant = (hidden_states_cot[-2].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
                     elif follow == 'bottom_row':
                         hidden_state_relevant = (hidden_states_cot[0].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                    elif follow == 'bottom_row_above':
+                        hidden_state_relevant = (hidden_states_cot[1].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
                     else:
                         assert False
                     #zs0.append(hidden_state_relevant)
@@ -169,6 +172,7 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, rnn, mode
             zs_p = get_relevant_zs(zs_p, zs_q, mode)
             kl_i = 0
             for z, zp, sigma_i, mlp in zip(zs_q, zs_p, sigmas, mlps):
+                import pdb; pdb.set_trace()
                 zps = mlp(zp) # bsz, hidden_size x  mixture_size+1
                 zps = zps.view(batch_size, hidden_size, -1)
                 zps_pred = zps[:, :, :-1] # bsz, hidden_size, mixture_size
@@ -189,23 +193,23 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, rnn, mode
                     ids_sorted = kls.argsort(dim=-1, descending=False)
                 kls_sorted = kls.gather(1, ids_sorted)
                 kls_sorted_pred = kls.gather(1, ids_sorted_pred) # bsz, mixture_size
-                kl_item_pred = kls_sorted_pred[:, 0].sum() / labels_nocot[..., 1:].ge(0).sum().item()
+                kl_item_pred = kls_sorted_pred[:, 0].sum() / labels_nocot.shape[0]  #/ labels_nocot[..., 1:].ge(0).sum().item()
                 probs_sorted = log_probs.gather(1, ids_sorted).exp()
                 total_loss_kls_mixture[kl_i] += kls_sorted.sum(0).cpu()
                 total_loss_kls_mixture_pred[kl_i] += kls_sorted_pred.sum(0).cpu()
                 total_loss_probs_mixture[kl_i] += probs_sorted.sum(0).cpu()
                 total_loss_ranks_mixture[kl_i] += ids_sorted_pred.eq(kl_ids.view(-1, 1)).float().argmax(-1).sum().cpu()
                 #kl_item = ((z-mlp(zp))*(z-mlp(zp))).sum() / sigma_i / sigma_i / 2 / labels_nocot[..., 1:].ge(0).sum().item()
-                kl_item = kl_item.sum() / labels_nocot[..., 1:].ge(0).sum().item()
+                kl_item = kl_item.sum() / labels_nocot.shape[0] # labels_nocot[..., 1:].ge(0).sum().item()
                 kl += kl_item
                 kl_pred += kl_item_pred
-                total_loss_kls[kl_i] += kl_item.item() * labels_nocot[...,1:].ge(0).sum().item()
-                total_loss_kls_pred[kl_i] += kl_item_pred.item() * labels_nocot[...,1:].ge(0).sum().item()
+                total_loss_kls[kl_i] += kl_item.item() * labels_nocot.shape[0]  #* labels_nocot[...,1:].ge(0).sum().item()
+                total_loss_kls_pred[kl_i] += kl_item_pred.item() * labels_nocot.shape[0] #  labels_nocot[...,1:].ge(0).sum().item()
                 kl_i += 1
-            total_loss += (loss.item() + kl.item()) * labels_nocot[...,1:].ge(0).sum().item()
-            total_loss_kl += kl.item() * labels_nocot[...,1:].ge(0).sum().item()
-            total_loss_kl_pred += kl_pred.item() * labels_nocot[...,1:].ge(0).sum().item()
-            total_loss_nll += loss.item() * labels_nocot[...,1:].ge(0).sum().item()
+            total_loss += (loss.item() + kl.item()) * labels_nocot.shape[0] #labels_nocot[...,1:].ge(0).sum().item()
+            total_loss_kl += kl.item() * labels_nocot.shape[0] # labels_nocot[...,1:].ge(0).sum().item()
+            total_loss_kl_pred += kl_pred.item() * labels_nocot.shape[0] # labels_nocot[...,1:].ge(0).sum().item()
+            total_loss_nll += loss.item() * labels_nocot.shape[0] # labels_nocot[...,1:].ge(0).sum().item()
 
             labels_pred = logits.argmax(-1)
             correct = ((labels_pred[...,:-1] == labels_nocot[..., 1:]) * labels_nocot[..., 1:].ge(0)).sum().item()
@@ -264,12 +268,12 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, rnn, mode
             ppl = float('inf')
         loss_nll = total_loss_nll / total
         ppl_nll = math.exp(loss_nll)
-        loss_kl = total_loss_kl / total
-        loss_kls = total_loss_kls / total
-        loss_kl_pred = total_loss_kl_pred / total
-        loss_kls_pred = total_loss_kls_pred / total
-        loss_kls_mixture = total_loss_kls_mixture / total
-        loss_kls_mixture_pred = total_loss_kls_mixture_pred / total
+        loss_kl = total_loss_kl / total_instances
+        loss_kls = total_loss_kls / total_instances
+        loss_kl_pred = total_loss_kl_pred / total_instances
+        loss_kls_pred = total_loss_kls_pred / total_instances
+        loss_kls_mixture = total_loss_kls_mixture / total_instances
+        loss_kls_mixture_pred = total_loss_kls_mixture_pred / total_instances
         loss_probs_mixture = total_loss_probs_mixture / total_instances
         loss_ranks_mixture = total_loss_ranks_mixture / total_instances
     return ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, loss_kls, loss_kls_mixture, loss_kls_mixture_pred, loss_probs_mixture, loss_ranks_mixture, loss_kl_pred, loss_kls_pred
@@ -300,6 +304,7 @@ def main():
     parser.add_argument('--lr', type=float, default=5e-5)
     parser.add_argument('--max_grad_norm', type=float, default=1.0)
     parser.add_argument('--kl_mean_weight', type=float, default=0.01)
+    parser.add_argument('--p_mean_weight', type=float, default=0.01)
     parser.add_argument('--model', type=str, default='gpt2')
     parser.add_argument('--save_model', type=str, default='model_nocot')
     parser.add_argument('--qmodel', type=str, default='gpt2')
@@ -309,9 +314,10 @@ def main():
     parser.add_argument('--use', type=str, choices=['argmin', 'pred', 'gt'], default='argmin')
     parser.add_argument('--compile', type=int, default=1)
     parser.add_argument('--no_save', type=int, default=0)
+    parser.add_argument('--last_id_minus', type=int, default=0)
     parser.add_argument('--interval', type=int, default=-1)
     parser.add_argument('--mixture_size', type=int, default=32)
-    parser.add_argument('--follow', type=str, choices=['diagonal_orig', 'diagonal', 'last_column', 'top_row', 'bottom_row', 'first_column'], default='diagonal')
+    parser.add_argument('--follow', type=str, choices=['diagonal_orig', 'diagonal', 'last_column', 'top_row', 'bottom_row', 'bottom_row_above',  'first_column'], default='diagonal')
     args = parser.parse_args()
 
     print (args)
@@ -350,6 +356,8 @@ def main():
              ) for _ in range(num_layers)]).to(device).to(ptdtype)
 
     rnn = nn.LSTM(input_size=hidden_size_in, hidden_size=hidden_size_in, num_layers=1, batch_first=False, dropout=0, bidirectional=False).to(device).to(ptdtype)
+    mlps.load_state_dict(torch.load(os.path.join(args.model, 'mlps.pt')))
+    rnn.load_state_dict(torch.load(os.path.join(args.model, 'rnn.pt')))
     #mlps_patch = nn.ModuleList([nn.Sequential(
     #         nn.Linear(hidden_size_in, hidden_size_mid),
     #         nn.ReLU(),
@@ -369,15 +377,16 @@ def main():
     use_fused = True 
     extra_args = dict(fused=True) if use_fused else dict()
     #optimizer = torch.optim.AdamW(list(model.parameters()) + list(mlps.parameters()), lr=args.lr, **extra_args)
-    optimizer = torch.optim.AdamW(list(model.parameters()) + list(mlps.parameters()) + list(rnn.parameters()), lr=args.lr, **extra_args)
+    all_parameters = list(model.parameters()) + list(mlps.parameters()) + list(rnn.parameters())
+    optimizer = torch.optim.AdamW(all_parameters, lr=args.lr, **extra_args)
     #optimizer_sigmas = torch.optim.SGD([sigmas], lr=args.lr)
     #optimizer = torch.optim.SGD([sigmas] + list(model.parameters())+list(model_q.parameters()), lr=args.lr)
 
     collate_fn = VAEDataCollator(tokenizer)
     train_dataset = CoTVAEDataset(tokenizer, args.train_path, 1024)
-    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True)
+    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=False)
     val_dataset = CoTVAEDataset(tokenizer, args.val_path, 1024)
-    val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True)
+    val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=False)
 
     torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
     torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
@@ -388,9 +397,10 @@ def main():
 
     #accuracy, word_accuracy, ppl = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas)
     #print (f'Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
-    for feed, use in [('q', 'gt'), ('p', 'argmin'), ('p', 'pred')]: #, (), (), ()]:
+    #for feed, use in [('q', 'gt'), ('p', 'argmin'), ('p', 'pred')]: #, (), (), ()]:
+    for feed, use in [('p', 'pred')]: #, (), (), ()]:
         print (f'feed: {feed}, use: {use}')
-        ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy, loss_kls, loss_kls_mixture, loss_kls_mixture_pred, loss_probs_mixture, loss_ranks_mixture, loss_kl_pred, loss_kls_pred = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, rnn, args.mode, args.follow, interval_arg=args.interval, mixture_size=args.mixture_size, feed=feed, use=use)#, mlps_patch)
+        ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy, loss_kls, loss_kls_mixture, loss_kls_mixture_pred, loss_probs_mixture, loss_ranks_mixture, loss_kl_pred, loss_kls_pred = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, rnn, args.mode, args.follow, interval_arg=args.interval, mixture_size=args.mixture_size, feed=feed, use=use, last_id_minus=args.last_id_minus)#, mlps_patch)
         #return ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, loss_kls, loss_kls_mixture, loss_kls_mixture_pred, loss_probs_mixture, loss_ranks_mixture
         print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Accuracy: {accuracy}. KL pred: {loss_kl_pred}")
         loss_kls = [ '%.2f' % elem for elem in loss_kls.tolist() ]
@@ -456,11 +466,12 @@ def main():
                         else:
                             last_id = len(mask_id_list) - 1
                             last_id -= 1
+                    last_id = last_id - args.last_id_minus
 
                     ##layers = torch.arange(start=0, end=num_layers+1)
                     layers = torch.arange(start=0, end=num_layers)
                     a = first_id
-                    if args.follow == 'diagonal' or args.follow == 'top_row' or args.follow == 'bottom_row':
+                    if args.follow == 'diagonal' or args.follow == 'top_row' or args.follow == 'bottom_row' or args.follow == 'bottom_row_above':
                         interval = (last_id - 1 - first_id) / (num_layers-1)
                     elif args.follow == 'diagonal_orig': # todo: rerun experiments with new setting, but don't think this would change things much
                         interval = (last_id - 1 - first_id) / (num_layers)
@@ -496,6 +507,8 @@ def main():
                         hidden_state_relevant = (hidden_states_cot[-2].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
                     elif args.follow == 'bottom_row':
                         hidden_state_relevant = (hidden_states_cot[0].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                    elif args.follow == 'bottom_row_above':
+                        hidden_state_relevant = (hidden_states_cot[1].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
                     else:
                         assert False
                     #zs0.append(hidden_state_relevant)
@@ -532,6 +545,7 @@ def main():
             correct = ((labels_pred[...,:-1] == labels_nocot[...,1:]) * labels_nocot[...,1:].ge(0)).sum().item()
             total = labels_nocot[...,1:].ge(0).sum().item()
             accuracy = correct / total
+            total_instances = labels_nocot.shape[0]
 
             kl = 0.
             #import pdb; pdb.set_trace()
@@ -566,20 +580,22 @@ def main():
                     ids_mixture_pred[kl_i] = ids_sorted_pred.eq(kl_ids.view(-1, 1)).float().argmax(-1)
                     ids_sorted = kls_.argsort(dim=-1, descending=False)
                     log_probs_selected = log_probs.gather(1, kl_ids.view(-1, 1))
-                    extra += -0.1 * log_probs_selected.mean()
+                    if args.p_mean_weight > 0:
+                        extra += -args.p_mean_weight * log_probs_selected.mean()
                     #extra += 0.01 * kls_.mean()
-                    extra += args.kl_mean_weight * kls_.mean()
+                    if args.kl_mean_weight > 0:
+                        extra += args.kl_mean_weight * kls_.mean()
                 with torch.no_grad():
                     #probs_sorted = log_probs_sorted.exp() # bsz, mixture_size
                     kls_sorted = kls_.gather(1, ids_sorted)
                     kls_sorted_pred = kls_.gather(1, ids_sorted_pred)
                     probs_sorted = log_probs.gather(1, ids_sorted).exp()
-                    kls_mixture[kl_i] = kls_sorted.sum(0).cpu() / total
-                    kls_mixture_pred[kl_i] = kls_sorted_pred.sum(0).cpu() / total
+                    kls_mixture[kl_i] = kls_sorted.sum(0).cpu() / total_instances
+                    kls_mixture_pred[kl_i] = kls_sorted_pred.sum(0).cpu() / total_instances
                     probs_mixture[kl_i] = probs_sorted.sum(0).cpu() / probs_sorted.shape[0]
 
                 #kl_item = ((z-mlp(zp))*(z-mlp(zp))).sum() / sigma_i / sigma_i / 2 / labels_nocot[..., 1:].ge(0).sum().item()
-                kl_item = kl_item.sum() / total
+                kl_item = kl_item.sum() / total_instances
                 kl += kl_item
                 #total_loss_kls[kl_i] += kl_item.item() * labels_nocot[...,1:].ge(0).sum().item()
                 #kl_i += 1
@@ -601,10 +617,12 @@ def main():
             #import pdb; pdb.set_trace()
 
             if step % args.accumulate == args.accumulate-1:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
-                #torch.nn.utils.clip_grad_norm_(model_q.parameters(), args.max_grad_norm)
-                torch.nn.utils.clip_grad_norm_(mlps.parameters(), args.max_grad_norm)
-                torch.nn.utils.clip_grad_norm_(rnn.parameters(), args.max_grad_norm)
+                ###torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+                ####torch.nn.utils.clip_grad_norm_(model_q.parameters(), args.max_grad_norm)
+                ###torch.nn.utils.clip_grad_norm_(mlps.parameters(), args.max_grad_norm)
+                ###torch.nn.utils.clip_grad_norm_(rnn.parameters(), args.max_grad_norm)
+
+                torch.nn.utils.clip_grad_norm_(all_parameters, args.max_grad_norm)
                 #torch.nn.utils.clip_grad_norm_([sigmas], args.max_grad_norm)
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
@@ -642,7 +660,7 @@ def main():
         #    print (kl_i, loss_prob_mixture)
         for feed, use in [('q', 'gt'), ('p', 'argmin'), ('p', 'pred')]: #, (), (), ()]:
             print (f'feed: {feed}, use: {use}')
-            ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy, loss_kls, loss_kls_mixture, loss_kls_mixture_pred, loss_probs_mixture, loss_ranks_mixture, loss_kl_pred, loss_kls_pred = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, rnn, args.mode, args.follow, interval_arg=args.interval, mixture_size=args.mixture_size, feed=feed, use=use)#, mlps_patch)
+            ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy, loss_kls, loss_kls_mixture, loss_kls_mixture_pred, loss_probs_mixture, loss_ranks_mixture, loss_kl_pred, loss_kls_pred = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, rnn, args.mode, args.follow, interval_arg=args.interval, mixture_size=args.mixture_size, feed=feed, use=use, last_id_minus=args.last_id_minus)#, mlps_patch)
             #return ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, loss_kls, loss_kls_mixture, loss_kls_mixture_pred, loss_probs_mixture, loss_ranks_mixture
             print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Accuracy: {accuracy}. KL pred: {loss_kl_pred}")
             loss_kls = [ '%.2f' % elem for elem in loss_kls.tolist() ]

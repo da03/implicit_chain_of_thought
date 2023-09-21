@@ -1995,3 +1995,135 @@ CUDA_VISIBLE_DEVICES=0 TOKENIZERS_PARALLELISM=false stdbuf -oL -eL python train_
     --mixture_size $M \
     > ${SAVE}/log.train.text.model${MODELSAVE}.folder${FOLDER}.e${EPOCHS}.lr${LR}.${BSZ} 2>&1&
 
+### Sep 18
+# phase 1, no legacy, orig data, gptsmall, interval 0, m1, feedp, use argmin 
+export LR=5e-5
+export MINUS=0
+export M=1
+export EPOCHS=60
+export INTERVAL=0
+export D=scaffolding_formula
+export MODEL=gpt2
+export BSZ=32
+export F=diagonal
+export FOLDER=sharps_distilled_200kaugmented_math_scaffolding_formula_cot_gpt2_repharvard_100k_beam1
+export MODELSAVE="${MODEL////_}"
+export QMODEL=/n/holyscratch01/rush_lab/Users/yuntian/implicit/200kaugmented_math_scaffolding_formula_cot_gpt2_repharvard_100k/checkpoint_14_5e-05_gpt2
+export SAVE=200kprelayernorm/phase1/nolegacy_origfeedp/distilldata/interval${INTERVAL}/gptsmall/m${M}/lr${LR}_minus${MINUS}_f${F}
+mkdir -p $SAVE
+CUDA_VISIBLE_DEVICES=0 TOKENIZERS_PARALLELISM=false stdbuf -oL -eL python train_phase1_fixed_math_interval_autoregressive_addmlp_rnn_mixture_learnp_feedp_fixnorm_origfeedp_prelayernorm.py \
+    --train_path data/${FOLDER}/src1_train.txt.1000plus \
+    --val_path data/sharps_200kaugmented_math_scaffolding_formula/src1_valid.txt \
+    --test_path data/${FOLDER}/src1_train.txt.1000 \
+    --epochs $EPOCHS \
+    --lr $LR \
+    --model $MODEL \
+    --batch_size $BSZ \
+    --qmodel $QMODEL \
+    --mode top \
+    --last_id_minus $MINUS \
+    --follow $F \
+    --no_save 0 \
+    --save_model /n/holyscratch01/rush_lab/Users/yuntian/implicit/$SAVE \
+    --compile 0 \
+    --interval $INTERVAL \
+    > ${SAVE}/log.train.text.model${MODELSAVE}.folder${FOLDER}.e${EPOCHS}.lr${LR}.${BSZ} 2>&1&
+
+# phase 1, no legacy, distill data, gptmedium, interval 0, m1, feedp, use argmin 
+export LR=5e-5
+export MINUS=0
+export M=1
+export EPOCHS=60
+export INTERVAL=0
+export D=scaffolding_formula
+export MODEL=gpt2-medium
+export BSZ=32
+export F=diagonal
+export FOLDER=sharps_distilled_200kaugmented_math_scaffolding_formula_cot_gpt2_repharvard_100k_beam1
+export MODELSAVE="${MODEL////_}"
+export QMODEL=/n/holyscratch01/rush_lab/Users/yuntian/implicit/200kaugmented_math_scaffolding_formula_cot_gpt2-medium_repharvard_100k/checkpoint_5_5e-05_gpt2-medium
+export SAVE=200kprelayernorm/phase1/nolegacy_origfeedp/distilldata/interval${INTERVAL}/gptmedium/m${M}/lr${LR}_minus${MINUS}_f${F}
+mkdir -p $SAVE
+CUDA_VISIBLE_DEVICES=1 TOKENIZERS_PARALLELISM=false stdbuf -oL -eL python train_phase1_fixed_math_interval_autoregressive_addmlp_rnn_mixture_learnp_feedp_fixnorm_origfeedp_prelayernorm.py \
+    --train_path data/${FOLDER}/src1_train.txt.1000plus \
+    --val_path data/sharps_200kaugmented_math_scaffolding_formula/src1_valid.txt \
+    --test_path data/${FOLDER}/src1_train.txt.1000 \
+    --epochs $EPOCHS \
+    --lr $LR \
+    --model $MODEL \
+    --batch_size $BSZ \
+    --qmodel $QMODEL \
+    --mode top \
+    --last_id_minus $MINUS \
+    --follow $F \
+    --no_save 0 \
+    --save_model /n/holyscratch01/rush_lab/Users/yuntian/implicit/$SAVE \
+    --compile 0 \
+    --interval $INTERVAL \
+    > ${SAVE}/log.train.text.model${MODELSAVE}.folder${FOLDER}.e${EPOCHS}.lr${LR}.${BSZ} 2>&1&
+
+
+# phase 1, no legacy, distill data, gptmedium, interval 0, m1, feedp, use argmin 
+export LR=5e-5
+export MINUS=0
+export M=1
+export EPOCHS=60
+export INTERVAL=1
+export D=scaffolding_formula
+export MODEL=gpt2-medium
+export BSZ=32
+export F=diagonal
+export FOLDER=sharps_distilled_200kaugmented_math_scaffolding_formula_cot_gpt2_repharvard_100k_beam1
+export MODELSAVE="${MODEL////_}"
+export QMODEL=/n/holyscratch01/rush_lab/Users/yuntian/implicit/200kaugmented_math_scaffolding_formula_cot_gpt2-medium_repharvard_100k/checkpoint_5_5e-05_gpt2-medium
+export SAVE=200kprelayernorm/phase1/nolegacy_origfeedp/distilldata/interval${INTERVAL}/gptmedium/m${M}/lr${LR}_minus${MINUS}_f${F}
+mkdir -p $SAVE
+CUDA_VISIBLE_DEVICES=2 TOKENIZERS_PARALLELISM=false stdbuf -oL -eL python train_phase1_fixed_math_interval_autoregressive_addmlp_rnn_mixture_learnp_feedp_fixnorm_origfeedp_prelayernorm.py \
+    --train_path data/${FOLDER}/src1_train.txt.1000plus \
+    --val_path data/sharps_200kaugmented_math_scaffolding_formula/src1_valid.txt \
+    --test_path data/${FOLDER}/src1_train.txt.1000 \
+    --epochs $EPOCHS \
+    --lr $LR \
+    --model $MODEL \
+    --batch_size $BSZ \
+    --qmodel $QMODEL \
+    --mode top \
+    --last_id_minus $MINUS \
+    --follow $F \
+    --no_save 0 \
+    --save_model /n/holyscratch01/rush_lab/Users/yuntian/implicit/$SAVE \
+    --compile 0 \
+    --interval $INTERVAL \
+    > ${SAVE}/log.train.text.model${MODELSAVE}.folder${FOLDER}.e${EPOCHS}.lr${LR}.${BSZ} 2>&1&
+# phase 1, no legacy, distill data, gptmedium, interval 0, m1, feedp, use argmin 
+export LR=5e-5
+export MINUS=0
+export M=1
+export EPOCHS=60
+export INTERVAL=2
+export D=scaffolding_formula
+export MODEL=gpt2-medium
+export BSZ=32
+export F=diagonal
+export FOLDER=sharps_distilled_200kaugmented_math_scaffolding_formula_cot_gpt2_repharvard_100k_beam1
+export MODELSAVE="${MODEL////_}"
+export QMODEL=/n/holyscratch01/rush_lab/Users/yuntian/implicit/200kaugmented_math_scaffolding_formula_cot_gpt2-medium_repharvard_100k/checkpoint_5_5e-05_gpt2-medium
+export SAVE=200kprelayernorm/phase1/nolegacy_origfeedp/distilldata/interval${INTERVAL}/gptmedium/m${M}/lr${LR}_minus${MINUS}_f${F}
+mkdir -p $SAVE
+CUDA_VISIBLE_DEVICES=2 TOKENIZERS_PARALLELISM=false stdbuf -oL -eL python train_phase1_fixed_math_interval_autoregressive_addmlp_rnn_mixture_learnp_feedp_fixnorm_origfeedp_prelayernorm.py \
+    --train_path data/${FOLDER}/src1_train.txt.1000plus \
+    --val_path data/sharps_200kaugmented_math_scaffolding_formula/src1_valid.txt \
+    --test_path data/${FOLDER}/src1_train.txt.1000 \
+    --epochs $EPOCHS \
+    --lr $LR \
+    --model $MODEL \
+    --batch_size $BSZ \
+    --qmodel $QMODEL \
+    --mode top \
+    --last_id_minus $MINUS \
+    --follow $F \
+    --no_save 0 \
+    --save_model /n/holyscratch01/rush_lab/Users/yuntian/implicit/$SAVE \
+    --compile 0 \
+    --interval $INTERVAL \
+    > ${SAVE}/log.train.text.model${MODELSAVE}.folder${FOLDER}.e${EPOCHS}.lr${LR}.${BSZ} 2>&1&

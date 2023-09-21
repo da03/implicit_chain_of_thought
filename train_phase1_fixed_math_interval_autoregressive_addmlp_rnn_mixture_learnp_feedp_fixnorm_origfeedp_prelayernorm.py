@@ -25,60 +25,20 @@ logging.disable(logging.WARNING) # disable WARNING, INFO and DEBUG logging every
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def set_relevant_zs(mode, zs_p, zs_q):
-    #import pdb; pdb.set_trace()
-    if mode == 'none':
-        pass
-    elif mode == 'top':
-        diff = len(zs_p) - len(zs_q)
-        zs_p[diff:] = zs_q
-    elif mode == 'bottom':
-        #if len(zs_q) < len(zs_p):
-        #    #diff = len(zs_p) - len(zs_q)
-        zs_p[:len(zs_q)] = zs_q
-    elif mode == 'interleave':
-        assert False
-        if len(zs_q) < len(zs_p):
-            a = len(zs_p) // len(zs_q)
-            zs_p = zs_p[(a-1)::a]
-    else:
-        assert False
-    #assert len(zs_p) == len(zs_q)
-    #return zs_p
-def get_relevant_zs(zs_p, zs_q, mode):
-    #import pdb; pdb.set_trace()
-    if mode == 'top':
-        if len(zs_q) < len(zs_p):
-            diff = len(zs_p) - len(zs_q)
-            zs_p = zs_p[diff:]
-    elif mode == 'interleave':
-        if len(zs_q) < len(zs_p):
-            a = len(zs_p) // len(zs_q)
-            zs_p = zs_p[(a-1)::a]
-    else:
-        assert False
-    assert len(zs_p) == len(zs_q)
-    return zs_p
 
-def save_model(model, model_q, mlps, tokenizer, model_dir):
-    os.makedirs(model_dir, exist_ok=True)
+def save_model(model, mlps, tokenizer, model_dir):
     print ('saving', model_dir)
+    os.makedirs(model_dir, exist_ok=True)
     model.save_pretrained(model_dir)
     tokenizer.save_pretrained(model_dir)
     torch.save(mlps.state_dict(), os.path.join(model_dir, 'mlps.pt'))
-    model_q_dir = os.path.join(model_dir, 'q')
-    os.makedirs(model_q_dir, exist_ok=True)
-    print ('saving', model_q_dir)
-    model_q.save_pretrained(model_q_dir)
-    tokenizer.save_pretrained(model_q_dir)
 
 def extract_answer(text):
     ans = text.strip().replace(',', '')
     return ans
 
-def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode, residual=False, follow=None, use_max=False, interval_arg=-1, last_id_minus=0, arg_max_new_tokens=300):
+def evaluate(layer_norm, model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode, follow=None, interval_arg=-1, last_id_minus=0):#, mlps_patch=None):
     with torch.no_grad():
-        assert residual
         model.eval()
         model_q.eval()
         total = 0
@@ -87,13 +47,20 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode, res
         total_loss = 0
         total_loss_nll = 0
         total_loss_kl = 0
+        total_loss_kl_pred = 0
+        num_layers = len(model.transformer.h)
+        total_loss_kls = torch.zeros(num_layers)
+        mixture_size = 1
+        total_loss_kls_pred = torch.zeros(num_layers)
+        total_loss_kls_mixture = torch.zeros(num_layers, mixture_size)
+        total_loss_kls_mixture_pred = torch.zeros(num_layers, mixture_size)
+        total_loss_probs_mixture = torch.zeros(num_layers, mixture_size)
+        total_loss_ranks_mixture = torch.zeros(num_layers)
         total_instances = 0
-        num_layers_p = len(model.transformer.h)
-        num_layers_q = len(model_q.transformer.h)
-        for batch in tqdm.tqdm(dataloader):
+        #for batch in tqdm.tqdm(dataloader):
+        for batch in dataloader:
             input_ids_cot = batch['input_ids_cot'].to(device)
             input_ids_nocot = batch['input_ids_nocot'].to(device)
-            #import pdb; pdb.set_trace()
             labels_cot = batch['labels_cot'].to(device)
             labels_cot_shift = batch['labels_cot_shift'].to(device)
             mask = labels_cot_shift.lt(0)
@@ -125,10 +92,9 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode, res
                         else:
                             last_id = len(mask_id_list) - 1
                             last_id -= 1
+                    last_id = last_id - last_id_minus
 
                     ###layers = torch.arange(start=0, end=num_layers+1)
-                    last_id = last_id - last_id_minus
-                    #import pdb; pdb.set_trace()
                     layers = torch.arange(start=0, end=num_layers)
                     a = first_id
                     #   ids = torch.round(first_id + layers * (last_id - 1 - first_id) / (num_layers))
@@ -156,24 +122,20 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode, res
                 zs0 = []
                 for i, hidden_states in enumerate(hidden_states_cot[:-1]):
                     if follow == 'diagonal' or follow == 'diagonal_orig' or follow == 'first_column' or follow == 'last_column':
-                        hidden_state_relevant = mlps[i](hidden_states.gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                        hidden_state_relevant = layer_norm(hidden_states.gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
                     elif follow == 'top_row':
-                        hidden_state_relevant = mlps[i](hidden_states_cot[-2].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                        hidden_state_relevant = layer_norm(hidden_states_cot[-2].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
                     elif follow == 'bottom_row':
-                        hidden_state_relevant = mlps[i](hidden_states_cot[0].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                        hidden_state_relevant = layer_norm(hidden_states_cot[0].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
                     elif follow == 'bottom_row_above':
-                        hidden_state_relevant = mlps[i](hidden_states_cot[1].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                        hidden_state_relevant = layer_norm(hidden_states_cot[1].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
                     else:
                         assert False
                     zs0.append(hidden_state_relevant)
                     #hidden_state_relevant_list.append(hidden_state_relevant + torch.randn_like(hidden_state_relevant) * sigmas[i])
                     hidden_state_relevant_list.append(hidden_state_relevant)
                 zs = hidden_state_relevant_list
-                zs_model = [None for _ in range(num_layers_p)]
-                #import pdb; pdb.set_trace()
-                set_relevant_zs(mode, zs_model, zs)
-                #outputs_nocot = model.forward_zs(input_ids=input_ids_nocot, zs=zs_model, first_ids=first_ids, residual=False)
-                outputs_nocot = model.forward_zs(input_ids=input_ids_nocot, zs=zs_model, first_ids=first_ids, residual=residual)
+                outputs_nocot = model.forward_zs_feedp(input_ids=input_ids_nocot, zs=hidden_state_relevant_list, first_ids=first_ids)
                 #outputs_nocot = model.forward_zs_attn(input_ids=input_ids_nocot, attended_to=hidden_states_cot, attended_to_mask=~mask, first_ids=first_ids, sigmas=sigmas)
                 zs_p = outputs_nocot.zs_p
                 zs_q = zs0 #outputs_nocot.zs_q
@@ -183,11 +145,42 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode, res
             loss_fct = CrossEntropyLoss()
             loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
             kl = 0.
-            #for z, zp, sigma_i in zip(zs_q, zs_p, sigmas):
-            #    kl += ((z-mlp(zp))*(z-mlp(zp))).sum() / sigma_i / sigma_i / 2 / labels_nocot[..., 1:].ge(0).sum().item()
-            total_loss += (loss + kl).item() * labels_nocot[...,1:].ge(0).sum().item()
-            total_loss_kl += kl * labels_nocot[...,1:].ge(0).sum().item()
-            total_loss_nll += loss.item() * labels_nocot[...,1:].ge(0).sum().item()
+            kl_pred = 0.
+            zs_p = get_relevant_zs(zs_p, zs_q, mode)
+            kl_i = 0
+            for z, zp, sigma_i, mlp in zip(zs_q, zs_p, sigmas, mlps):
+                zps = mlp(zp) # bsz, hidden_size x  mixture_size+1
+                zps = zps.view(batch_size, hidden_size, -1)
+                assert zps.shape[-1] == 1
+                zps_pred = zps
+                diff = zps_pred - z.unsqueeze(-1)
+                kls = (diff*diff).sum(1) / 2 # bsz, mixture_size
+
+                if False:
+                    kls = kls + log_probs
+                    kl_item = torch.logsumexp(kls, dim=-1)
+                else:
+                    kl_item, kl_ids = kls.min(-1) # bsz
+                    #ids_mixture[kl_i] = kl_ids
+                    ids_sorted = kls.argsort(dim=-1, descending=False)
+                kls_sorted = kls.gather(1, ids_sorted)
+                kls_sorted_pred = kls
+                kl_item_pred = kls_sorted_pred[:, 0].sum() / labels_nocot.shape[0]  #/ labels_nocot[..., 1:].ge(0).sum().item()
+                total_loss_kls_mixture[kl_i] += kls_sorted.sum(0).cpu()
+                total_loss_kls_mixture_pred[kl_i] += kls_sorted_pred.sum(0).cpu()
+                total_loss_probs_mixture[kl_i] += batch_size
+                total_loss_ranks_mixture[kl_i] += 0
+                #kl_item = ((z-mlp(zp))*(z-mlp(zp))).sum() / sigma_i / sigma_i / 2 / labels_nocot[..., 1:].ge(0).sum().item()
+                kl_item = kl_item.sum() / labels_nocot.shape[0] # labels_nocot[..., 1:].ge(0).sum().item()
+                kl += kl_item
+                kl_pred += kl_item_pred
+                total_loss_kls[kl_i] += kl_item.item() * labels_nocot.shape[0]  #* labels_nocot[...,1:].ge(0).sum().item()
+                total_loss_kls_pred[kl_i] += kl_item_pred.item() * labels_nocot.shape[0] #  labels_nocot[...,1:].ge(0).sum().item()
+                kl_i += 1
+            total_loss += (loss.item() + kl.item()) * labels_nocot.shape[0] #labels_nocot[...,1:].ge(0).sum().item()
+            total_loss_kl += kl.item() * labels_nocot.shape[0] # labels_nocot[...,1:].ge(0).sum().item()
+            total_loss_kl_pred += kl_pred.item() * labels_nocot.shape[0] # labels_nocot[...,1:].ge(0).sum().item()
+            total_loss_nll += loss.item() * labels_nocot.shape[0] # labels_nocot[...,1:].ge(0).sum().item()
 
             labels_pred = logits.argmax(-1)
             correct = ((labels_pred[...,:-1] == labels_nocot[..., 1:]) * labels_nocot[..., 1:].ge(0)).sum().item()
@@ -198,65 +191,9 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode, res
             # TODO: generate and evaluate accuracy
             # activate beam search and early_stopping
             #import pdb; pdb.set_trace()
-            #sep_ids = []
+
             for i, input_ids_single in enumerate(input_ids_nocot):
-                sep_id = input_ids_single.tolist().index(tokenizer.eos_token_id)
-                #sep_ids.append(sep_id)
-            #assert all([item == sep_id for item in sep_ids])
-            #import pdb; pdb.set_trace()
-                tgt = input_ids_single[sep_id+1:]
-                max_new_tokens = tgt.size(0)+10
-                max_new_tokens = tgt[tgt.ne(tokenizer.eos_token_id)].size(0)+10
-                beam_size = 5
-                if not use_max:
-                    max_new_tokens = arg_max_new_tokens
-                beam_output = model.generate(
-                    input_ids=input_ids_single[:sep_id+1].unsqueeze(0),
-                    max_new_tokens=max_new_tokens,
-                    num_beams=beam_size,
-                    early_stopping=True,
-                    num_return_sequences=1,
-                    first_ids=first_ids[i:i+1].repeat_interleave(beam_size, dim=0),
-                    zs=[z[i:i+1].repeat_interleave(beam_size, dim=0) if z is not None else z for z in zs_model],
-                )
-                ##src = input_ids_single[:sep_idx+1]
-                ##tgt = input_ids_single[sep_idx+1:]
-
-                ##sep_idx = tgt.tolist().index(tokenizer.eos_token_id)
-                ##tgt = tgt[:sep_idx]
-                ##tgt_text = tokenizer.decode(tgt)
-                ###ans = extract_answer(tgt_text)
-                ##ans = tgt_text.strip()
-
-
-                ##beam_output = model.generate(
-                ##    input_ids=src.view(1, -1),
-                ##    max_new_tokens=100,
-                ##    num_beams=5,
-                ##    early_stopping=True,
-                ##    num_return_sequences=1,
-                ##)
-                ##
-            #import pdb; pdb.set_trace()
-            #i = 0
-            #for input_ids_single, beam_output_i in zip(input_ids_nocot, beam_output):
-                #tgt = tgt[:sep_id]
-                tgt_text = tokenizer.decode(tgt, skip_special_tokens=True)
-                ans = tgt_text.strip()
-                pred_text = tokenizer.decode(beam_output[0][sep_id+1:], skip_special_tokens=True)
-                if i == 0:
-                    print ("\n" + 100 * '-')
-                    print ('GT:', tokenizer.decode(input_ids_single, skip_special_tokens=True))
-                    print ('Predicted:', pred_text)
-                pred_ans = pred_text.strip() #.split()[-1] #extract_answer(pred_text)
-                #import pdb; pdb.set_trace()
                 total_instances += 1
-                if ans == pred_ans:
-                    total_correct += 1
-                i += 1
-
-            #for i, input_ids_single in enumerate(input_ids_nocot):
-            #    total_instances += 1
         ##TODO        sep_idx = input_ids_single.tolist().index(tokenizer.eos_token_id)
         ##TODO        src = input_ids_single[:sep_idx+1]
         ##TODO        tgt = input_ids_single[sep_idx+1:]
@@ -302,9 +239,30 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode, res
             ppl = float('inf')
         loss_nll = total_loss_nll / total
         ppl_nll = math.exp(loss_nll)
-        loss_kl = total_loss_kl / total
-    return ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, accuracy
+        loss_kl = total_loss_kl / total_instances
+        loss_kls = total_loss_kls / total_instances
+        loss_kl_pred = total_loss_kl_pred / total_instances
+        loss_kls_pred = total_loss_kls_pred / total_instances
+        loss_kls_mixture = total_loss_kls_mixture / total_instances
+        loss_kls_mixture_pred = total_loss_kls_mixture_pred / total_instances
+        loss_probs_mixture = total_loss_probs_mixture / total_instances
+        loss_ranks_mixture = total_loss_ranks_mixture / total_instances
+    return ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, loss_kls, loss_kls_mixture, loss_kls_mixture_pred, loss_probs_mixture, loss_ranks_mixture, loss_kl_pred, loss_kls_pred
 
+def get_relevant_zs(zs_p, zs_q, mode):
+    #import pdb; pdb.set_trace()
+    if mode == 'top':
+        if len(zs_q) < len(zs_p):
+            diff = len(zs_p) - len(zs_q)
+            zs_p = zs_p[diff:]
+    elif mode == 'interleave':
+        if len(zs_q) < len(zs_p):
+            a = len(zs_p) // len(zs_q)
+            zs_p = zs_p[(a-1)::a]
+    else:
+        assert False
+    assert len(zs_p) == len(zs_q)
+    return zs_p
 
 def main():
     parser = argparse.ArgumentParser()
@@ -322,10 +280,10 @@ def main():
     parser.add_argument('--residual', type=int, default=0)
     parser.add_argument('--mode', type=str, choices=['top', 'interleave', 'bottom', 'none'], default='none')
     parser.add_argument('--compile', type=int, default=1)
-    parser.add_argument('--interval', type=int, default=-1)
-    parser.add_argument('--max_new_tokens', type=int, default=300)
+    parser.add_argument('--no_save', type=int, default=0)
     parser.add_argument('--last_id_minus', type=int, default=0)
-    parser.add_argument('--follow', type=str, choices=['diagonal', 'diagonal_orig', 'last_column', 'top_row', 'bottom_row', 'bottom_row_above', 'first_column'], default='diagonal_orig')
+    parser.add_argument('--interval', type=int, default=-1)
+    parser.add_argument('--follow', type=str, choices=['diagonal_orig', 'diagonal', 'last_column', 'top_row', 'bottom_row', 'bottom_row_above',  'first_column'], default='diagonal')
     args = parser.parse_args()
 
     print (args)
@@ -333,7 +291,7 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
     #if 'gpt2-xl' not in args.model:
-    #    dtype = 'float32'
+    dtype = 'float32'
     dtype = 'float32'
     ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
     print (ptdtype, dtype)
@@ -351,33 +309,39 @@ def main():
     use_fused = fused_available
     extra_args = dict(fused=True) if use_fused else dict()
     num_layers = len(model.transformer.h)
-    num_layers_p = num_layers
-    num_layers_q = len(model_q.transformer.h)
-    sigmas = torch.ones(num_layers_q).to(ptdtype).to(device)
-    hidden_size_in = model_q.config.hidden_size
-    hidden_size_out = model.config.hidden_size
+    sigmas = torch.ones(num_layers).to(ptdtype).to(device)
+    #import pdb; pdb.set_trace()
+    #mlp: model -> model_q
+    hidden_size_in = model.config.hidden_size
+    hidden_size_out = model_q.config.hidden_size
     hidden_size_mid = 4 * max(hidden_size_in, hidden_size_out)
     mlps = nn.ModuleList([nn.Sequential(
              nn.Linear(hidden_size_in, hidden_size_mid),
              nn.ReLU(),
              nn.Linear(hidden_size_mid, hidden_size_out),
-             ) for _ in range(num_layers_q)]).to(device).to(ptdtype)
-    #mlps.load_state_dict(torch.load(os.path.join(args.qmodel, 'mlps.pt')))
+             ) for _ in range(num_layers)]).to(device).to(ptdtype)
+    layer_norm = nn.LayerNorm(hidden_size_out, elementwise_affine=False).to(device).to(ptdtype)
+    #mlps_patch = nn.ModuleList([nn.Sequential(
+    #         nn.Linear(hidden_size_in, hidden_size_mid),
+    #         nn.ReLU(),
+    #         nn.Linear(hidden_size_mid, hidden_size_out),
+    #         ) for _ in range(num_layers)]).to(device).to(ptdtype)
+    #mlps_patch.load_state_dict(torch.load(os.path.join(args.qmodel, 'mlps.pt')))
     #sigmas = torch.zeros(num_layers).to(ptdtype).to(device)
     sigmas = torch.nn.Parameter(sigmas)
     #import pdb; pdb.set_trace()
     #optimizer = torch.optim.AdamW([sigmas] + list(model.parameters())+list(model_q.parameters()), lr=args.lr)
     for p in model_q.parameters():
         p.requires_grad = False
+    #for p in mlps_patch.parameters():
+    #    p.requires_grad = False
     sigmas.requires_grad = False
     #optimizer = torch.optim.AdamW([sigmas] + list(model.parameters()) + list(mlp.parameters()), lr=args.lr)
-    #optimizer = torch.optim.AdamW(list(model.parameters()) + list(mlp.parameters()), lr=args.lr)
-    #optimizer = torch.optim.AdamW(list(model.parameters()) + list(mlps.parameters()) + list(model_q.parameters()), lr=args.lr)
     use_fused = True 
     extra_args = dict(fused=True) if use_fused else dict()
-    #optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, **extra_args)
-    optimizer = torch.optim.AdamW(list(model.parameters()) + list(mlps.parameters()), lr=args.lr, **extra_args)
-    #optimizer = torch.optim.AdamW([sigmas] + list(model.parameters())+list(model_q.parameters()), lr=args.lr)
+    #optimizer = torch.optim.AdamW(list(model.parameters()) + list(mlps.parameters()), lr=args.lr, **extra_args)
+    all_parameters = list(model.parameters()) + list(mlps.parameters())
+    optimizer = torch.optim.AdamW(all_parameters, lr=args.lr, **extra_args)
     #optimizer_sigmas = torch.optim.SGD([sigmas], lr=args.lr)
     #optimizer = torch.optim.SGD([sigmas] + list(model.parameters())+list(model_q.parameters()), lr=args.lr)
 
@@ -386,6 +350,9 @@ def main():
     train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True)
     val_dataset = CoTVAEDataset(tokenizer, args.val_path, 1024)
     val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True)
+
+    test_dataset = CoTVAEDataset(tokenizer, args.test_path, 1024)
+    test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True)
 
     torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
     torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
@@ -396,19 +363,39 @@ def main():
 
     #accuracy, word_accuracy, ppl = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas)
     #print (f'Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
-    model.eval()
-    model_q.eval()
-    ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, accuracy = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.residual==1, args.follow, use_max=True, interval_arg=args.interval, last_id_minus=args.last_id_minus)
-    print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}")
+    for setting, dataloader in [('val', val_dataloader), ('test', test_dataloader)]:
+        for feed, use in [('p', 'pred')]: #, (), (), ()]:
+            print ('*'*10)
+            print (setting)
+            print (f'feed: {feed}, use: {use}')
+            ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy, loss_kls, loss_kls_mixture, loss_kls_mixture_pred, loss_probs_mixture, loss_ranks_mixture, loss_kl_pred, loss_kls_pred = evaluate(layer_norm, model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.follow, interval_arg=args.interval, last_id_minus=args.last_id_minus)#, mlps_patch)
+            #return ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, loss_kls, loss_kls_mixture, loss_kls_mixture_pred, loss_probs_mixture, loss_ranks_mixture
+            print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Accuracy: {accuracy}. KL pred: {loss_kl_pred}")
+            loss_kls = [ '%.2f' % elem for elem in loss_kls.tolist() ]
+            print ('kls real', loss_kls)
+            loss_kls = [ '%.2f' % elem for elem in loss_kls_pred.tolist() ]
+            print ('kls pred', loss_kls)
+            for kl_i, (loss_prob_mixture, loss_rank_mixture, loss_kl_mixture, loss_kl_mixture_pred) in enumerate(zip(loss_probs_mixture, loss_ranks_mixture, loss_kls_mixture, loss_kls_mixture_pred)):
+                loss_prob_mixture = [ '%.2f' % elem for elem in loss_prob_mixture.tolist() ]
+                print (kl_i, loss_prob_mixture)
+                loss_kl_mixture = [ '%.2f' % elem for elem in loss_kl_mixture.tolist() ]
+                print (kl_i, 'kl sorted', loss_kl_mixture)
+                loss_kl_mixture = [ '%.2f' % elem for elem in loss_kl_mixture_pred.tolist() ]
+                print (kl_i, 'kl pred', loss_kl_mixture)
+                print (kl_i, 'rank pred', loss_rank_mixture)
+            print ('='*10)
     #model.train()
     #model_q.train()
+    model.eval()
+    model_q.eval()
 
     #model.eval()
     #model_q.eval()
     step = 0
     #import pdb; pdb.set_trace()
     for epoch in range(args.epochs):
-        save_model(model, model_q, mlps, tokenizer, f'{args.save_model}/checkpoint_{epoch}_{args.lr}')
+        if args.no_save != 1:
+            save_model(model, mlps, tokenizer, f'{args.save_model}/checkpoint_{epoch}_{args.lr}')
         print(f"Epoch {epoch}") #TODO change epoch
 
         #model.save_pretrained("finetuned_gpt2")
@@ -450,7 +437,6 @@ def main():
                     last_id = last_id - args.last_id_minus
 
                     ##layers = torch.arange(start=0, end=num_layers+1)
-
                     layers = torch.arange(start=0, end=num_layers)
                     a = first_id
                     if args.follow == 'diagonal' or args.follow == 'top_row' or args.follow == 'bottom_row' or args.follow == 'bottom_row_above':
@@ -484,13 +470,13 @@ def main():
                 zs0 = []
                 for i, hidden_states in enumerate(hidden_states_cot[:-1]):
                     if args.follow == 'diagonal' or args.follow == 'diagonal_orig' or args.follow == 'first_column' or args.follow == 'last_column':
-                        hidden_state_relevant = mlps[i](hidden_states.gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                        hidden_state_relevant = layer_norm(hidden_states.gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
                     elif args.follow == 'top_row':
-                        hidden_state_relevant = mlps[i](hidden_states_cot[-2].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                        hidden_state_relevant = layer_norm(hidden_states_cot[-2].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
                     elif args.follow == 'bottom_row':
-                        hidden_state_relevant = mlps[i](hidden_states_cot[0].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                        hidden_state_relevant = layer_norm(hidden_states_cot[0].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
                     elif args.follow == 'bottom_row_above':
-                        hidden_state_relevant = mlps[i](hidden_states_cot[1].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                        hidden_state_relevant = layer_norm(hidden_states_cot[1].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
                     else:
                         assert False
                     zs0.append(hidden_state_relevant)
@@ -500,11 +486,8 @@ def main():
                 ###for hidden_states in hidden_states_cot:
                 ###    hidden_states[mask] = 0 # batch_size, seq_len, hidden_size
                 zs = hidden_state_relevant_list
-                #import pdb; pdb.set_trace()
-                zs_model = [None for _ in range(num_layers_p)]
-                set_relevant_zs(args.mode, zs_model, zs)
-                outputs_nocot = model.forward_zs(input_ids=input_ids_nocot, zs=zs_model, first_ids=first_ids, residual=args.residual==1)
-                #outputs_nocot = model.forward_zs_attn(input_ids=input_ids_nocot, attended_to=hidden_states_cot, attended_to_mask=~mask, first_ids=first_ids, sigmas=sigmas)
+
+                outputs_nocot = model.forward_zs_feedp(input_ids=input_ids_nocot, zs=hidden_state_relevant_list, first_ids=first_ids)
                 zs_p = outputs_nocot.zs_p
                 zs_q = zs0 #outputs_nocot.zs_q
             #loss = outputs.loss
@@ -513,14 +496,55 @@ def main():
             labels_pred = logits.argmax(-1)
             #import pdb; pdb.set_trace()
             correct = ((labels_pred[...,:-1] == labels_nocot[...,1:]) * labels_nocot[...,1:].ge(0)).sum().item()
-            total = labels_nocot[...,1:].ge(0).sum()
+            total = labels_nocot[...,1:].ge(0).sum().item()
             accuracy = correct / total
+            total_instances = labels_nocot.shape[0]
 
             kl = 0.
             #import pdb; pdb.set_trace()
-            #for z, zp, sigma_i in zip(zs_q, zs_p, sigmas):
-            #    #kl += ((z-zp)*(z-zp)).sum() / sigma_i / sigma_i / 2 / total
-            #    kl += ((z-mlp(zp))*(z-mlp(zp))).sum() / sigma_i / sigma_i / 2 / total
+            zs_p = get_relevant_zs(zs_p, zs_q, args.mode)
+            kls = torch.zeros(num_layers)
+            mixture_size = 1
+            kls_mixture = torch.zeros(num_layers, mixture_size)
+            kls_mixture_pred = torch.zeros(num_layers, mixture_size)
+            probs_mixture = torch.zeros(num_layers, mixture_size)
+            ids_mixture = torch.zeros(num_layers, batch_size)
+            ids_mixture_pred = torch.zeros(num_layers, batch_size)
+            kl_i = 0
+            for z, zp, sigma_i, mlp in zip(zs_q, zs_p, sigmas, mlps):
+                zps = mlp(zp) # bsz, hidden_size x  mixture_size+1
+                zps = zps.view(batch_size, hidden_size, -1)
+                assert zps.shape[-1] == 1
+                zps_pred = zps
+                diff = zps_pred - z.unsqueeze(-1)
+                kls_ = (diff*diff).sum(1) / 2 # bsz, mixture_size
+                if False:
+                    kls_ = kls_ + log_probs
+                    kl_item = torch.logsumexp(kls_, dim=-1)
+                    extra +=- 0.05 * (log_probs).sum() / batch_size
+                else:
+                    kl_item, kl_ids = kls_.min(-1) # bsz
+                    ids_mixture[kl_i] = kl_ids
+                    ids_mixture_pred[kl_i] = 0
+                    ids_sorted = kls_.argsort(dim=-1, descending=False)
+                with torch.no_grad():
+                    #probs_sorted = log_probs_sorted.exp() # bsz, mixture_size
+                    kls_sorted = kls_.gather(1, ids_sorted)
+                    kls_sorted_pred = kls_
+                    kls_mixture[kl_i] = kls_sorted.sum(0).cpu() / total_instances
+                    kls_mixture_pred[kl_i] = kls_sorted_pred.sum(0).cpu() / total_instances
+                    probs_mixture[kl_i] = 1
+
+                #kl_item = ((z-mlp(zp))*(z-mlp(zp))).sum() / sigma_i / sigma_i / 2 / labels_nocot[..., 1:].ge(0).sum().item()
+                kl_item = kl_item.sum() / total_instances
+                kl += kl_item
+                #total_loss_kls[kl_i] += kl_item.item() * labels_nocot[...,1:].ge(0).sum().item()
+                #kl_i += 1
+                #kl += ((z-zp)*(z-zp)).sum() / sigma_i / sigma_i / 2 / total
+                #kl_item = ((z-mlp(zp))*(z-mlp(zp))).sum() / sigma_i / sigma_i / 2 / total
+                #kl += kl_item
+                kls[kl_i] += kl_item.item()
+                kl_i += 1
 
 
             shift_logits = logits[..., :-1, :].contiguous()
@@ -528,15 +552,18 @@ def main():
             loss_fct = CrossEntropyLoss()
             nll = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1)) 
             loss = nll + kl
-            nll.div(args.accumulate).backward()
+            #nll.div(args.accumulate).backward()
             #loss.div(args.accumulate).backward()
-            #kl.div(args.accumulate).backward()
+            kl.div(args.accumulate).backward()
             #import pdb; pdb.set_trace()
 
             if step % args.accumulate == args.accumulate-1:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
-                #torch.nn.utils.clip_grad_norm_(model_q.parameters(), args.max_grad_norm)
-                torch.nn.utils.clip_grad_norm_(mlps.parameters(), args.max_grad_norm)
+                ###torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+                ####torch.nn.utils.clip_grad_norm_(model_q.parameters(), args.max_grad_norm)
+                ###torch.nn.utils.clip_grad_norm_(mlps.parameters(), args.max_grad_norm)
+                ###torch.nn.utils.clip_grad_norm_(rnn.parameters(), args.max_grad_norm)
+
+                torch.nn.utils.clip_grad_norm_(all_parameters, args.max_grad_norm)
                 #torch.nn.utils.clip_grad_norm_([sigmas], args.max_grad_norm)
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
@@ -550,17 +577,51 @@ def main():
             ppl0 = math.exp(nll.item())
             if step % 100 == 0:
                 print (f"Step: {step}. PPL: {ppl}. Loss: {loss}. PPL0: {ppl0}. NLL: {nll}. KL: {kl}. Accuracy: {accuracy}")
-                print (sigmas)
+                kls = [ '%.2f' % elem for elem in kls.tolist() ]
+                print (kls)
+                for kl_i, (loss_prob_mixture, loss_kl_mixture, loss_kl_mixture_pred, id_mixture, id_mixture_pred) in enumerate(zip(probs_mixture, kls_mixture, kls_mixture_pred, ids_mixture, ids_mixture_pred)):
+                    loss_prob_mixture = [ '%.2f' % elem for elem in loss_prob_mixture.tolist() ]
+                    print (kl_i, loss_prob_mixture)
+                    loss_kl_mixture = [ '%.2f' % elem for elem in loss_kl_mixture.tolist() ]
+                    print (kl_i, 'min loss', loss_kl_mixture)
+                    loss_kl_mixture_pred = [ '%.2f' % elem for elem in loss_kl_mixture_pred.tolist() ]
+                    print (kl_i, 'pred loss', loss_kl_mixture_pred)
+                    print (kl_i, 'min component', id_mixture)
+                    print (kl_i, 'rank', id_mixture_pred)
                 sys.stdout.flush()
             step += 1
-            #if step >= 2000:
-            #    break
     #    accuracy, word_accuracy, ppl = evaluate(model, model_q, train_dataloader, tokenizer, ctx, sigmas)
     #    accuracy, word_accuracy, ppl = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas)
-        #ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode)
+        #ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy, loss_kls, loss_kls_mixture, loss_probs_mixture = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, rnn, args.mode, args.follow, interval_arg=args.interval, mixture_size=args.mixture_size)#, mlps_patch)
         #print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Accuracy: {accuracy}")
-        ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, accuracy = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.residual==1, args.follow, interval_arg=args.interval, last_id_minus=args.last_id_minus, arg_max_new_tokens=args.max_new_tokens)
-        print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}")
+        #loss_kls = [ '%.2f' % elem for elem in loss_kls.tolist() ]
+        #print (loss_kls)
+        #for kl_i, (loss_prob_mixture, loss_kl_mixture) in enumerate(zip(loss_probs_mixture, loss_kls_mixture)):
+        #    loss_prob_mixture = [ '%.2f' % elem for elem in loss_prob_mixture.tolist() ]
+        #    print (kl_i, loss_prob_mixture)
+        for setting, dataloader in [('val', val_dataloader), ('test', test_dataloader)]:
+            for feed, use in [('p', 'pred')]: #, (), (), ()]:
+                print ('*'*10)
+                print (setting)
+                print (f'feed: {feed}, use: {use}')
+                ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy, loss_kls, loss_kls_mixture, loss_kls_mixture_pred, loss_probs_mixture, loss_ranks_mixture, loss_kl_pred, loss_kls_pred = evaluate(layer_norm, model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.follow, interval_arg=args.interval, last_id_minus=args.last_id_minus)#, mlps_patch)
+                #return ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, loss_kls, loss_kls_mixture, loss_kls_mixture_pred, loss_probs_mixture, loss_ranks_mixture
+                print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Accuracy: {accuracy}. KL pred: {loss_kl_pred}")
+                loss_kls = [ '%.2f' % elem for elem in loss_kls.tolist() ]
+                print ('kls real', loss_kls)
+                loss_kls = [ '%.2f' % elem for elem in loss_kls_pred.tolist() ]
+                print ('kls pred', loss_kls)
+                for kl_i, (loss_prob_mixture, loss_rank_mixture, loss_kl_mixture, loss_kl_mixture_pred) in enumerate(zip(loss_probs_mixture, loss_ranks_mixture, loss_kls_mixture, loss_kls_mixture_pred)):
+                    loss_prob_mixture = [ '%.2f' % elem for elem in loss_prob_mixture.tolist() ]
+                    print (kl_i, loss_prob_mixture)
+                    loss_kl_mixture = [ '%.2f' % elem for elem in loss_kl_mixture.tolist() ]
+                    print (kl_i, 'kl sorted', loss_kl_mixture)
+                    loss_kl_mixture = [ '%.2f' % elem for elem in loss_kl_mixture_pred.tolist() ]
+                    print (kl_i, 'kl pred', loss_kl_mixture)
+                    print (kl_i, 'rank pred', loss_rank_mixture)
+                print ('='*10)
+        #    loss_kl_mixture = [ '%.2f' % elem for elem in loss_kl_mixture.tolist() ]
+        #    print (kl_i, loss_kl_mixture)
         #print (f'Epoch {epoch}. Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
         #print ('sigmas', sigmas)
         sys.stdout.flush()

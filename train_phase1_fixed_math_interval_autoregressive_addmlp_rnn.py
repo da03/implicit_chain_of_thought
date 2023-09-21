@@ -255,7 +255,6 @@ def main():
     dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
     #if 'gpt2-xl' not in args.model:
     dtype = 'float32'
-    dtype = 'float32'
     ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
     print (ptdtype, dtype)
     model_q = AutoModelForCausalLM.from_pretrained(args.qmodel).to(device).to(ptdtype)
