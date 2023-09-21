@@ -78,7 +78,6 @@ def extract_answer(text):
 
 def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode, residual=False, follow=None, use_max=False, interval_arg=-1, last_id_minus=0, arg_max_new_tokens=300):
     with torch.no_grad():
-        assert residual
         model.eval()
         model_q.eval()
         total = 0
@@ -173,6 +172,7 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode, res
                 #import pdb; pdb.set_trace()
                 set_relevant_zs(mode, zs_model, zs)
                 #outputs_nocot = model.forward_zs(input_ids=input_ids_nocot, zs=zs_model, first_ids=first_ids, residual=False)
+                assert not residual
                 outputs_nocot = model.forward_zs(input_ids=input_ids_nocot, zs=zs_model, first_ids=first_ids, residual=residual)
                 #outputs_nocot = model.forward_zs_attn(input_ids=input_ids_nocot, attended_to=hidden_states_cot, attended_to_mask=~mask, first_ids=first_ids, sigmas=sigmas)
                 zs_p = outputs_nocot.zs_p
@@ -207,7 +207,7 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode, res
                 tgt = input_ids_single[sep_id+1:]
                 max_new_tokens = tgt.size(0)+10
                 max_new_tokens = tgt[tgt.ne(tokenizer.eos_token_id)].size(0)+10
-                beam_size = 5
+                beam_size = 1
                 if not use_max:
                     max_new_tokens = arg_max_new_tokens
                 beam_output = model.generate(
@@ -218,6 +218,7 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode, res
                     num_return_sequences=1,
                     first_ids=first_ids[i:i+1].repeat_interleave(beam_size, dim=0),
                     zs=[z[i:i+1].repeat_interleave(beam_size, dim=0) if z is not None else z for z in zs_model],
+                    residual=residual,
                 )
                 ##src = input_ids_single[:sep_idx+1]
                 ##tgt = input_ids_single[sep_idx+1:]
@@ -361,7 +362,17 @@ def main():
              nn.Linear(hidden_size_in, hidden_size_mid),
              nn.ReLU(),
              nn.Linear(hidden_size_mid, hidden_size_out),
+             nn.LayerNorm(hidden_size_out)
              ) for _ in range(num_layers_q)]).to(device).to(ptdtype)
+    #if args.residual == 1:
+    #    a = 1
+    #else:
+    #    a = 2
+    #mlps_merge = nn.ModuleList([nn.Sequential(
+    #         nn.Linear(a*hidden_size_in, hidden_size_mid),
+    #         nn.ReLU(),
+    #         nn.Linear(hidden_size_mid, hidden_size_out),
+    #         ) for _ in range(num_layers_q)]).to(device).to(ptdtype)
     #mlps.load_state_dict(torch.load(os.path.join(args.qmodel, 'mlps.pt')))
     #sigmas = torch.zeros(num_layers).to(ptdtype).to(device)
     sigmas = torch.nn.Parameter(sigmas)
@@ -376,7 +387,9 @@ def main():
     use_fused = True 
     extra_args = dict(fused=True) if use_fused else dict()
     #optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, **extra_args)
-    optimizer = torch.optim.AdamW(list(model.parameters()) + list(mlps.parameters()), lr=args.lr, **extra_args)
+    #all_params = list(model.parameters()) + list(mlps.parameters()) + list(mlps_merge.parameters())
+    all_params = list(model.parameters()) + list(mlps.parameters())
+    optimizer = torch.optim.AdamW(all_params, lr=args.lr, **extra_args)
     #optimizer = torch.optim.AdamW([sigmas] + list(model.parameters())+list(model_q.parameters()), lr=args.lr)
     #optimizer_sigmas = torch.optim.SGD([sigmas], lr=args.lr)
     #optimizer = torch.optim.SGD([sigmas] + list(model.parameters())+list(model_q.parameters()), lr=args.lr)
@@ -386,6 +399,9 @@ def main():
     train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True)
     val_dataset = CoTVAEDataset(tokenizer, args.val_path, 1024)
     val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True)
+
+    test_dataset = CoTVAEDataset(tokenizer, args.test_path, 1024)
+    test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True)
 
     torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
     torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
@@ -400,6 +416,8 @@ def main():
     model_q.eval()
     ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, accuracy = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.residual==1, args.follow, use_max=True, interval_arg=args.interval, last_id_minus=args.last_id_minus)
     print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}")
+    ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, accuracy = evaluate(model, model_q, test_dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.residual==1, args.follow, use_max=True, interval_arg=args.interval, last_id_minus=args.last_id_minus)
+    print (f"Test. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Test Accuracy: {accuracy}. Word Accuracy: {word_accuracy}")
     #model.train()
     #model_q.train()
 
@@ -503,7 +521,11 @@ def main():
                 #import pdb; pdb.set_trace()
                 zs_model = [None for _ in range(num_layers_p)]
                 set_relevant_zs(args.mode, zs_model, zs)
-                outputs_nocot = model.forward_zs(input_ids=input_ids_nocot, zs=zs_model, first_ids=first_ids, residual=args.residual==1)
+                if args.residual == 1:
+                    clone = True
+                else:
+                    clone = False
+                outputs_nocot = model.forward_zs(input_ids=input_ids_nocot, zs=zs_model, first_ids=first_ids, residual=args.residual==1, clone=clone)
                 #outputs_nocot = model.forward_zs_attn(input_ids=input_ids_nocot, attended_to=hidden_states_cot, attended_to_mask=~mask, first_ids=first_ids, sigmas=sigmas)
                 zs_p = outputs_nocot.zs_p
                 zs_q = zs0 #outputs_nocot.zs_q
@@ -534,9 +556,11 @@ def main():
             #import pdb; pdb.set_trace()
 
             if step % args.accumulate == args.accumulate-1:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+                #torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
                 #torch.nn.utils.clip_grad_norm_(model_q.parameters(), args.max_grad_norm)
-                torch.nn.utils.clip_grad_norm_(mlps.parameters(), args.max_grad_norm)
+                #torch.nn.utils.clip_grad_norm_(mlps.parameters(), args.max_grad_norm)
+                #torch.nn.utils.clip_grad_norm_(mlps_merge.parameters(), args.max_grad_norm)
+                torch.nn.utils.clip_grad_norm_(all_params, args.max_grad_norm)
                 #torch.nn.utils.clip_grad_norm_([sigmas], args.max_grad_norm)
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
@@ -561,6 +585,8 @@ def main():
         #print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Accuracy: {accuracy}")
         ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, accuracy = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.residual==1, args.follow, interval_arg=args.interval, last_id_minus=args.last_id_minus, arg_max_new_tokens=args.max_new_tokens)
         print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}")
+        ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, accuracy = evaluate(model, model_q, test_dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.residual==1, args.follow, interval_arg=args.interval, last_id_minus=args.last_id_minus)
+        print (f"Test. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Test Accuracy: {accuracy}. Word Accuracy: {word_accuracy}")
         #print (f'Epoch {epoch}. Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
         #print ('sigmas', sigmas)
         sys.stdout.flush()

@@ -162,12 +162,16 @@ def main():
     train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True)
     val_dataset = CoTDataset(tokenizer, args.val_path, 1024)
     val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True)
+    test_dataset = CoTDataset(tokenizer, args.test_path, 1024)
+    test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True)
 
     torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
     torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
     ctx = torch.amp.autocast(device_type='cuda', dtype=ptdtype)
     accuracy, word_accuracy, ppl = evaluate(model, val_dataloader, tokenizer, ctx, beam_size, use_max=True)
     print (f'Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
+    accuracy, word_accuracy, ppl = evaluate(model, test_dataloader, tokenizer, ctx, beam_size, use_max=True)
+    print (f'Test PPL: {ppl}. Test Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
     model.train()
     step = 0
     def save_model(model, tokenizer, model_dir):
@@ -215,6 +219,8 @@ def main():
             step += 1
         accuracy, word_accuracy, ppl = evaluate(model, val_dataloader, tokenizer, ctx, beam_size)
         print (f'Epoch {epoch}. Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
+        accuracy, word_accuracy, ppl = evaluate(model, test_dataloader, tokenizer, ctx, beam_size)
+        print (f'Test PPL: {ppl}. Test Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
         model.train()
 
 if __name__ == "__main__":

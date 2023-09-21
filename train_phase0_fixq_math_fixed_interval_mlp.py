@@ -60,12 +60,13 @@ def get_relevant_zs(zs_p, zs_q, mode):
     assert len(zs_p) == len(zs_q)
     return zs_p
 
-def save_model(model, model_q, mlps, tokenizer, model_dir):
+def save_model(model, model_q, mlps, mlps_merge, tokenizer, model_dir):
     os.makedirs(model_dir, exist_ok=True)
     print ('saving', model_dir)
     model.save_pretrained(model_dir)
     tokenizer.save_pretrained(model_dir)
     torch.save(mlps.state_dict(), os.path.join(model_dir, 'mlps.pt'))
+    torch.save(mlps_merge.state_dict(), os.path.join(model_dir, 'mlps_merge.pt'))
     model_q_dir = os.path.join(model_dir, 'q')
     os.makedirs(model_q_dir, exist_ok=True)
     print ('saving', model_q_dir)
@@ -76,9 +77,8 @@ def extract_answer(text):
     ans = text.strip().replace(',', '')
     return ans
 
-def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode, residual=False, follow=None, use_max=False, interval_arg=-1, last_id_minus=0, arg_max_new_tokens=300):
+def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mlps_merge, mode, residual=False, follow=None, use_max=False, interval_arg=-1, last_id_minus=0, arg_max_new_tokens=300):
     with torch.no_grad():
-        assert residual
         model.eval()
         model_q.eval()
         total = 0
@@ -173,7 +173,7 @@ def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mode, res
                 #import pdb; pdb.set_trace()
                 set_relevant_zs(mode, zs_model, zs)
                 #outputs_nocot = model.forward_zs(input_ids=input_ids_nocot, zs=zs_model, first_ids=first_ids, residual=False)
-                outputs_nocot = model.forward_zs(input_ids=input_ids_nocot, zs=zs_model, first_ids=first_ids, residual=residual)
+                outputs_nocot = model.forward_zs(input_ids=input_ids_nocot, zs=zs_model, first_ids=first_ids, residual=residual, mlps_merge=mlps_merge)
                 #outputs_nocot = model.forward_zs_attn(input_ids=input_ids_nocot, attended_to=hidden_states_cot, attended_to_mask=~mask, first_ids=first_ids, sigmas=sigmas)
                 zs_p = outputs_nocot.zs_p
                 zs_q = zs0 #outputs_nocot.zs_q
@@ -362,6 +362,11 @@ def main():
              nn.ReLU(),
              nn.Linear(hidden_size_mid, hidden_size_out),
              ) for _ in range(num_layers_q)]).to(device).to(ptdtype)
+    mlps_merge = nn.ModuleList([nn.Sequential(
+             nn.Linear(2*hidden_size_in, hidden_size_mid),
+             nn.ReLU(),
+             nn.Linear(hidden_size_mid, hidden_size_out),
+             ) for _ in range(num_layers_q)]).to(device).to(ptdtype)
     #mlps.load_state_dict(torch.load(os.path.join(args.qmodel, 'mlps.pt')))
     #sigmas = torch.zeros(num_layers).to(ptdtype).to(device)
     sigmas = torch.nn.Parameter(sigmas)
@@ -376,7 +381,7 @@ def main():
     use_fused = True 
     extra_args = dict(fused=True) if use_fused else dict()
     #optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, **extra_args)
-    optimizer = torch.optim.AdamW(list(model.parameters()) + list(mlps.parameters()), lr=args.lr, **extra_args)
+    optimizer = torch.optim.AdamW(list(model.parameters()) + list(mlps.parameters()) + list(mlps_merge.parameters()), lr=args.lr, **extra_args)
     #optimizer = torch.optim.AdamW([sigmas] + list(model.parameters())+list(model_q.parameters()), lr=args.lr)
     #optimizer_sigmas = torch.optim.SGD([sigmas], lr=args.lr)
     #optimizer = torch.optim.SGD([sigmas] + list(model.parameters())+list(model_q.parameters()), lr=args.lr)
@@ -398,7 +403,7 @@ def main():
     #print (f'Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
     model.eval()
     model_q.eval()
-    ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, accuracy = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.residual==1, args.follow, use_max=True, interval_arg=args.interval, last_id_minus=args.last_id_minus)
+    ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, accuracy = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, mlps_merge, args.mode, args.residual==1, args.follow, use_max=True, interval_arg=args.interval, last_id_minus=args.last_id_minus)
     print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}")
     #model.train()
     #model_q.train()
@@ -408,7 +413,7 @@ def main():
     step = 0
     #import pdb; pdb.set_trace()
     for epoch in range(args.epochs):
-        save_model(model, model_q, mlps, tokenizer, f'{args.save_model}/checkpoint_{epoch}_{args.lr}')
+        save_model(model, model_q, mlps, mlps_merge, tokenizer, f'{args.save_model}/checkpoint_{epoch}_{args.lr}')
         print(f"Epoch {epoch}") #TODO change epoch
 
         #model.save_pretrained("finetuned_gpt2")
@@ -503,7 +508,7 @@ def main():
                 #import pdb; pdb.set_trace()
                 zs_model = [None for _ in range(num_layers_p)]
                 set_relevant_zs(args.mode, zs_model, zs)
-                outputs_nocot = model.forward_zs(input_ids=input_ids_nocot, zs=zs_model, first_ids=first_ids, residual=args.residual==1)
+                outputs_nocot = model.forward_zs(input_ids=input_ids_nocot, zs=zs_model, first_ids=first_ids, residual=args.residual==1, mlps_merge=mlps_merge)
                 #outputs_nocot = model.forward_zs_attn(input_ids=input_ids_nocot, attended_to=hidden_states_cot, attended_to_mask=~mask, first_ids=first_ids, sigmas=sigmas)
                 zs_p = outputs_nocot.zs_p
                 zs_q = zs0 #outputs_nocot.zs_q
@@ -537,6 +542,7 @@ def main():
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
                 #torch.nn.utils.clip_grad_norm_(model_q.parameters(), args.max_grad_norm)
                 torch.nn.utils.clip_grad_norm_(mlps.parameters(), args.max_grad_norm)
+                torch.nn.utils.clip_grad_norm_(mlps_merge.parameters(), args.max_grad_norm)
                 #torch.nn.utils.clip_grad_norm_([sigmas], args.max_grad_norm)
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
@@ -559,7 +565,7 @@ def main():
     #    accuracy, word_accuracy, ppl = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas)
         #ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode)
         #print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Accuracy: {accuracy}")
-        ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, accuracy = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.residual==1, args.follow, interval_arg=args.interval, last_id_minus=args.last_id_minus, arg_max_new_tokens=args.max_new_tokens)
+        ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, accuracy = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, mlps_merge, args.mode, args.residual==1, args.follow, interval_arg=args.interval, last_id_minus=args.last_id_minus, arg_max_new_tokens=args.max_new_tokens)
         print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}")
         #print (f'Epoch {epoch}. Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
         #print ('sigmas', sigmas)
