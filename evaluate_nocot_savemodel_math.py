@@ -1,5 +1,6 @@
 import math
 import torch
+import time
 from torch.utils.data import Dataset, DataLoader
 from torch.nn import CrossEntropyLoss
 from transformers import AutoModelForCausalLM, AutoTokenizer, AdamW
@@ -28,6 +29,7 @@ def extract_answer(text):
         return ans
 
 def evaluate(model, dataloader, tokenizer, ctx, beam_size=5, use_max=False):
+    total_time = 0
     with torch.no_grad():
         total = 0
         word_correct = 0
@@ -55,6 +57,7 @@ def evaluate(model, dataloader, tokenizer, ctx, beam_size=5, use_max=False):
             #import pdb; pdb.set_trace()
 
             #sep_ids = []
+            start_time = time.time()
             for i, input_ids_single in enumerate(input_ids):
                 total_instances += 1
                 sep_id = input_ids_single.tolist().index(tokenizer.eos_token_id)
@@ -109,9 +112,12 @@ def evaluate(model, dataloader, tokenizer, ctx, beam_size=5, use_max=False):
                     total_correct += 1
                 i += 1
             #break
+            end_time = time.time()
+            total_time += end_time - start_time
 
         word_accuracy = word_correct / total
         accuracy = total_correct / total_instances
+        print (total_time, total_instances, total_instances / total_time)
         loss = total_loss / total
         ppl = math.exp(loss)
     return accuracy, word_accuracy, ppl
@@ -119,8 +125,6 @@ def evaluate(model, dataloader, tokenizer, ctx, beam_size=5, use_max=False):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train_path', type=str, default='data/math_scaffolding/src1_train.txt')
-    parser.add_argument('--val_path', type=str, default='data/math_scaffolding/src1_valid.txt')
     parser.add_argument('--test_path', type=str, default='data/math_scaffolding/src1_test.txt')
     parser.add_argument('--epochs', type=int, default=5)
     parser.add_argument('--compile', type=int, default=1)
@@ -136,13 +140,8 @@ def main():
     
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
-    if 'gpt2-xl' not in args.model:
-        dtype = 'float32'
-        beam_size = 5
-    else:
-        dtype = 'float32'
-        beam_size = 1
     beam_size = 1
+    dtype = 'float32'
     ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
     print (ptdtype, dtype, beam_size)
     model = AutoModelForCausalLM.from_pretrained(args.model).to(device).to(ptdtype)
@@ -150,78 +149,70 @@ def main():
         model = torch.compile(model)
     else:
         print ('WARNING: no compile!')
-    # TODO: maybe use pretrained model here?
-    #model.apply(model._init_weights)
-    #optimizer = AdamW(model.parameters(), lr=args.lr)
-    # Create AdamW optimizer and use the fused version if it is available
-    #fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
     use_fused = True 
     extra_args = dict(fused=True) if use_fused else dict()
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, **extra_args)
 
     collate_fn = DataCollator(tokenizer)
-    train_dataset = NoCoTDataset(tokenizer, args.train_path, 1024)
-    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True)
-    val_dataset = NoCoTDataset(tokenizer, args.val_path, 1024)
-    val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True)
     test_dataset = NoCoTDataset(tokenizer, args.test_path, 1024)
-    test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True)
+    test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=False)
 
     torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
     torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
     ctx = torch.amp.autocast(device_type='cuda', dtype=ptdtype)
-    #accuracy, word_accuracy, ppl = evaluate(model, val_dataloader, tokenizer, ctx, beam_size, use_max=True)
-    #print (f'Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
-    #accuracy, word_accuracy, ppl = evaluate(model, test_dataloader, tokenizer, ctx, beam_size, use_max=True)
-    #print (f'Test PPL: {ppl}. Test Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
-    model.train()
-    step = 0
-    def save_model(model, tokenizer, model_dir):
-        print ('saving', model_dir)
-        os.makedirs(model_dir, exist_ok=True)
-        model.save_pretrained(model_dir)
-        tokenizer.save_pretrained(model_dir)
+    start = time.time()
+    accuracy, word_accuracy, ppl = evaluate(model, test_dataloader, tokenizer, ctx, beam_size, use_max=False)
+    end = time.time()
+    print (end - start)
+    print (f'Test PPL: {ppl}. Test Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
+    #model.train()
+    #step = 0
+    #def save_model(model, tokenizer, model_dir):
+    #    print ('saving', model_dir)
+    #    os.makedirs(model_dir, exist_ok=True)
+    #    model.save_pretrained(model_dir)
+    #    tokenizer.save_pretrained(model_dir)
 
-    for epoch in range(args.epochs):
-        save_model(model, tokenizer, f'{args.save_model}/checkpoint_{epoch}_{args.lr}_{args.model}')
-        print(f"Epoch {epoch}") #TODO change epoch
+    #for epoch in range(args.epochs):
+    #    save_model(model, tokenizer, f'{args.save_model}/checkpoint_{epoch}_{args.lr}_{args.model}')
+    #    print(f"Epoch {epoch}") #TODO change epoch
 
-        #model.save_pretrained("finetuned_gpt2")
-        for batch in tqdm.tqdm(train_dataloader):
-            #if epoch == 1:
-            #    import pdb; pdb.set_trace()
-            input_ids = batch['input_ids'].to(device)
-            labels = batch['labels'].to(device)
-            with ctx:
-                outputs = model(input_ids=input_ids)
-            #loss = outputs.loss
-            logits = outputs.logits
+    #    #model.save_pretrained("finetuned_gpt2")
+    #    for batch in tqdm.tqdm(train_dataloader):
+    #        #if epoch == 1:
+    #        #    import pdb; pdb.set_trace()
+    #        input_ids = batch['input_ids'].to(device)
+    #        labels = batch['labels'].to(device)
+    #        with ctx:
+    #            outputs = model(input_ids=input_ids)
+    #        #loss = outputs.loss
+    #        logits = outputs.logits
 
-            labels_pred = logits.argmax(-1)
-            correct = ((labels_pred[...,:-1] == labels[...,1:]) * labels[...,1:].ge(0)).sum().item()
-            total = labels[...,1:].ge(0).sum()
-            accuracy = correct / total
+    #        labels_pred = logits.argmax(-1)
+    #        correct = ((labels_pred[...,:-1] == labels[...,1:]) * labels[...,1:].ge(0)).sum().item()
+    #        total = labels[...,1:].ge(0).sum()
+    #        accuracy = correct / total
 
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
-            loss_fct = CrossEntropyLoss()
-            loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+    #        shift_logits = logits[..., :-1, :].contiguous()
+    #        shift_labels = labels[..., 1:].contiguous()
+    #        loss_fct = CrossEntropyLoss()
+    #        loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
 
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
-            optimizer.step()
-            optimizer.zero_grad()
-            loss = loss.item()
-            ppl = math.exp(loss)
-            if step % 100 == 0:
-                print (f"Step: {step}. PPL: {ppl}. Accuracy: {accuracy}")
-                sys.stdout.flush()
-            step += 1
-        accuracy, word_accuracy, ppl = evaluate(model, val_dataloader, tokenizer, ctx, beam_size)
-        print (f'Epoch {epoch}. Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
-        #accuracy, word_accuracy, ppl = evaluate(model, test_dataloader, tokenizer, ctx, beam_size)
-        #print (f'Test PPL: {ppl}. Test Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
-        model.train()
+    #        loss.backward()
+    #        torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+    #        optimizer.step()
+    #        optimizer.zero_grad()
+    #        loss = loss.item()
+    #        ppl = math.exp(loss)
+    #        if step % 100 == 0:
+    #            print (f"Step: {step}. PPL: {ppl}. Accuracy: {accuracy}")
+    #            sys.stdout.flush()
+    #        step += 1
+    #    accuracy, word_accuracy, ppl = evaluate(model, val_dataloader, tokenizer, ctx, beam_size)
+    #    print (f'Epoch {epoch}. Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
+    #    accuracy, word_accuracy, ppl = evaluate(model, test_dataloader, tokenizer, ctx, beam_size)
+    #    print (f'Test PPL: {ppl}. Test Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
+    #    model.train()
 
 if __name__ == "__main__":
     main()

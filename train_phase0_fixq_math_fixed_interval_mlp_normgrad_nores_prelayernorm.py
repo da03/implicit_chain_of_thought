@@ -364,6 +364,10 @@ def main():
              nn.ReLU(),
              nn.Linear(hidden_size_mid, hidden_size_out),
              ) for _ in range(num_layers_q)]).to(device).to(ptdtype)
+
+    if os.path.exists(os.path.join(args.model, 'mlps.pt')):
+        print ('WARNING')
+        mlps.load_state_dict(torch.load(os.path.join(args.model, 'mlps.pt')))
     #if args.residual == 1:
     #    a = 1
     #else:
@@ -416,8 +420,8 @@ def main():
     model_q.eval()
     ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, accuracy = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.residual==1, args.follow, use_max=True, interval_arg=args.interval, last_id_minus=args.last_id_minus)
     print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}")
-    ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, accuracy = evaluate(model, model_q, test_dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.residual==1, args.follow, use_max=True, interval_arg=args.interval, last_id_minus=args.last_id_minus)
-    print (f"Test. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Test Accuracy: {accuracy}. Word Accuracy: {word_accuracy}")
+    #ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, accuracy = evaluate(model, model_q, test_dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.residual==1, args.follow, use_max=True, interval_arg=args.interval, last_id_minus=args.last_id_minus)
+    #print (f"Test. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Test Accuracy: {accuracy}. Word Accuracy: {word_accuracy}")
     #model.train()
     #model_q.train()
 
@@ -585,8 +589,8 @@ def main():
         #print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Accuracy: {accuracy}")
         ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, accuracy = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.residual==1, args.follow, interval_arg=args.interval, last_id_minus=args.last_id_minus, arg_max_new_tokens=args.max_new_tokens)
         print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}")
-        ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, accuracy = evaluate(model, model_q, test_dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.residual==1, args.follow, interval_arg=args.interval, last_id_minus=args.last_id_minus)
-        print (f"Test. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Test Accuracy: {accuracy}. Word Accuracy: {word_accuracy}")
+        #ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, accuracy = evaluate(model, model_q, test_dataloader, tokenizer, ctx, sigmas, mlps, args.mode, args.residual==1, args.follow, interval_arg=args.interval, last_id_minus=args.last_id_minus)
+        #print (f"Test. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Test Accuracy: {accuracy}. Word Accuracy: {word_accuracy}")
         #print (f'Epoch {epoch}. Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
         #print ('sigmas', sigmas)
         sys.stdout.flush()
@@ -594,6 +598,7 @@ def main():
     #    model_q.train()
         model.eval()
         model_q.eval()
+    save_model(model, model_q, mlps, tokenizer, f'{args.save_model}/checkpoint_{epoch}_{args.lr}')
 
 if __name__ == "__main__":
     main()

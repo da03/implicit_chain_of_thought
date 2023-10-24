@@ -21,7 +21,10 @@ def main(input_formula_dir, output_formula_dir):
                     if ' #### ' not in line:
                         print ('warning')
                         continue
-                    line = line.replace(' #### ', ' #### #### ')
+                    items = line.strip().split('||')
+                    assert len(items) == 2, line
+                    line = items[0] + '||' + items[1].replace('<<', '').replace('>>', '') + '\n'
+                    #line = line.replace(' #### ', ' #### #### ')
                     fout.write(line)
 
 def parse_arguments():
@@ -34,29 +37,27 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Augment")
     #parser.add_argument("--input_formula_dir", type=str, default="data/200kaugmented_math_scaffolding_formula", help="Output folder")
     #parser.add_argument("--output_formula_dir", type=str, default="data/sharps_200kaugmented_math_scaffolding_formula", help="Output folder")
-    #parser.add_argument("--input_formula_dir", type=str, default="data/300kaugmented_math_scaffolding_formula", help="Output folder")
-    #parser.add_argument("--output_formula_dir", type=str, default="data/sharps_300kaugmented_math_scaffolding_formula", help="Output folder")
-    #parser.add_argument("--input_formula_dir", type=str, default="data/400kaugmented_math_scaffolding_formula", help="Output folder")
-    #parser.add_argument("--output_formula_dir", type=str, default="data/sharps_400kaugmented_math_scaffolding_formula", help="Output folder")
-    #parser.add_argument("--input_formula_dir", type=str, default="data/long_mult_4_inter", help="Output folder")
-    #parser.add_argument("--output_formula_dir", type=str, default="data/sharps_long_mult_4_inter", help="Output folder")
-    #parser.add_argument("--input_formula_dir", type=str, default="data/long_mult_5_inter", help="Output folder")
-    #parser.add_argument("--output_formula_dir", type=str, default="data/sharps_long_mult_5_inter", help="Output folder")
+    #parser.add_argument("--input1_formula_dir", type=str, default="data/300kaugmented_math_scaffolding_formula", help="Output folder")
+    #parser.add_argument("--input2_formula_dir", type=str, default="data/sharps_300kaugmented_math_scaffolding_formula", help="Output folder")
+    #parser.add_argument("--output1_formula_dir", type=str, default="data/nobrackets_300kaugmented_math_scaffolding_formula", help="Output folder")
+    #parser.add_argument("--output2_formula_dir", type=str, default="data/sharps_nobrackets_300kaugmented_math_scaffolding_formula", help="Output folder")
+    parser.add_argument("--input1_formula_dir", type=str, default="data/400kaugmented_math_scaffolding_formula", help="Output folder")
+    parser.add_argument("--input2_formula_dir", type=str, default="data/sharps_400kaugmented_math_scaffolding_formula", help="Output folder")
+    parser.add_argument("--output1_formula_dir", type=str, default="data/nobrackets_400kaugmented_math_scaffolding_formula", help="Output folder")
+    parser.add_argument("--output2_formula_dir", type=str, default="data/sharps_nobrackets_400kaugmented_math_scaffolding_formula", help="Output folder")
     #parser.add_argument("--input_formula_dir", type=str, default="data/distilled_200kaugmented_math_scaffolding_formula_cot_gpt2_repharvard_100k_beam1", help="Output folder")
     #parser.add_argument("--output_formula_dir", type=str, default="data/sharps_distilled_200kaugmented_math_scaffolding_formula_cot_gpt2_repharvard_100k_beam1", help="Output folder")
     #parser.add_argument("--input_formula_dir", type=str, default="data/distilled_200kaugmented_math_scaffolding_formula_cot_gpt2-medium_repharvard_100k_beam1", help="Output folder")
     #parser.add_argument("--output_formula_dir", type=str, default="data/sharps_distilled_200kaugmented_math_scaffolding_formula_cot_gpt2-medium_repharvard_100k_beam1", help="Output folder")
     #parser.add_argument("--input_formula_dir", type=str, default="data/distilled_augmented_math_scaffolding_formula_cot_gpt2_repharvard_100k_beam1", help="Output folder")
     #parser.add_argument("--output_formula_dir", type=str, default="data/sharps_distilled_augmented_math_scaffolding_formula_cot_gpt2_repharvard_100k_beam1", help="Output folder")
-    #parser.add_argument("--input_formula_dir", type=str, default="data/distilled_nobrackets_300kaugmented_math_scaffolding_formula_cot_gpt2-medium_repharvard_100k_beam1_merged", help="Output folder")
-    #parser.add_argument("--output_formula_dir", type=str, default="data/sharps_distilled_nobrackets_300kaugmented_math_scaffolding_formula_cot_gpt2-medium_repharvard_100k_beam1_merged", help="Output folder")
-    #parser.add_argument("--input_formula_dir", type=str, default="data/distilled_nobrackets_300kaugmented_math_scaffolding_formula_cot_gpt2-medium_repharvard_100k_beam1_merged", help="Output folder")
-    #parser.add_argument("--output_formula_dir", type=str, default="data/sharps_distilled_nobrackets_300kaugmented_math_scaffolding_formula_cot_gpt2-medium_repharvard_100k_beam1_merged", help="Output folder")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_arguments()
 
-    main(input_formula_dir=args.input_formula_dir, \
-         output_formula_dir=args.output_formula_dir)
+    main(input_formula_dir=args.input1_formula_dir, \
+         output_formula_dir=args.output1_formula_dir)
+    main(input_formula_dir=args.input2_formula_dir, \
+         output_formula_dir=args.output2_formula_dir)

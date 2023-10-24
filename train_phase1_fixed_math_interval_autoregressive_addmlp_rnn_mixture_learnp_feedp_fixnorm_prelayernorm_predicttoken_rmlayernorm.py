@@ -1,5 +1,4 @@
 import math
-import re
 import torch
 import sys
 from torch.utils.data import Dataset, DataLoader
@@ -27,7 +26,7 @@ logging.disable(logging.WARNING) # disable WARNING, INFO and DEBUG logging every
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
-def save_model(key_proj, query_proj, out_proj, model, mlps, mixture_components, rnn, tokenizer, model_dir):
+def save_model(model, mlps, mixture_components, rnn, tokenizer, model_dir):
     print ('saving', model_dir)
     os.makedirs(model_dir, exist_ok=True)
     model.save_pretrained(model_dir)
@@ -36,37 +35,21 @@ def save_model(key_proj, query_proj, out_proj, model, mlps, mixture_components, 
     torch.save(mixture_components.state_dict(), os.path.join(model_dir, 'mixture_components.pt'))
     if rnn is not None:
         torch.save(rnn.state_dict(), os.path.join(model_dir, 'rnn.pt'))
-    if key_proj is not None:
-        torch.save(key_proj.state_dict(), os.path.join(model_dir, 'key_proj.pt'))
-    if query_proj is not None:
-        torch.save(query_proj.state_dict(), os.path.join(model_dir, 'query_proj.pt'))
-    if out_proj is not None:
-        torch.save(out_proj.state_dict(), os.path.join(model_dir, 'out_proj.pt'))
 
 def extract_answer(text):
     ans = text.strip().replace(',', '')
     return ans
 
-def evaluate(no_mixture, key_proj, query_proj, out_proj, layer_norm, model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mixture_components, rnn, mode, follow=None, interval_arg=-1, mixture_size=-1, feed='p', use='argmin', last_id_minus=0, print_eqns=False):#, mlps_patch=None):
+def evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mixture_components, rnn, mode, follow=None, interval_arg=-1, mixture_size=-1, feed='p', use='argmin', last_id_minus=0):#, mlps_patch=None):
     assert feed in ['p', 'q']
     if feed == 'p':
         assert use in ['argmin', 'pred']
     else:
         assert use in ['gt']
 
-    print_eqns = True
     with torch.no_grad():
         model.eval()
         model_q.eval()
-        if print_eqns:
-            import collections
-            total_finished = 0
-            total_unfinished = 0
-            total_invalid = 0
-            total_valid = 0
-            total_eqns = collections.defaultdict(int)
-            final_match_eqns = collections.defaultdict(int)
-            full_match_eqns = collections.defaultdict(int)
         total = 0
         word_correct = 0
         total_correct = 0
@@ -146,18 +129,16 @@ def evaluate(no_mixture, key_proj, query_proj, out_proj, layer_norm, model, mode
                 hidden_state_relevant_list = []
                 #import pdb; pdb.set_trace()
                 relevant_tokens = input_ids_cot.gather(1, relevant_ids)
-                if no_mixture == 1:
-                    relevant_tokens = relevant_tokens*0
                 zs0 = []
                 for i, hidden_states in enumerate(hidden_states_cot[:-1]):
                     if follow == 'diagonal' or follow == 'diagonal_orig' or follow == 'first_column' or follow == 'last_column':
-                        hidden_state_relevant = layer_norm(hidden_states.gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                        hidden_state_relevant = (hidden_states.gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
                     elif follow == 'top_row':
-                        hidden_state_relevant = layer_norm(hidden_states_cot[-2].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                        hidden_state_relevant = (hidden_states_cot[-2].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
                     elif follow == 'bottom_row':
-                        hidden_state_relevant = layer_norm(hidden_states_cot[0].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                        hidden_state_relevant = (hidden_states_cot[0].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
                     elif follow == 'bottom_row_above':
-                        hidden_state_relevant = layer_norm(hidden_states_cot[1].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                        hidden_state_relevant = (hidden_states_cot[1].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
                     else:
                         assert False
                     #zs0.append(hidden_state_relevant)
@@ -165,47 +146,22 @@ def evaluate(no_mixture, key_proj, query_proj, out_proj, layer_norm, model, mode
                     hidden_state_relevant_list.append(hidden_state_relevant)
                 zs = hidden_state_relevant_list
                 hidden_state_relevant_list_rnn = []
-                past_keys = None # bsz, len, hidden_size
                 if feed == 'q':
                     if rnn is not None:
-                        if key_proj is not None:
-                            rnn_state = None
-                            c = None
-                            #import pdb; pdb.set_trace()
-                            for z in zs: # z: batch, hidden
-                                if c is None:
-                                    c = z.new_zeros(z.shape)
-                                output, rnn_state = rnn((z+c).unsqueeze(0), rnn_state)
-                                output = output.squeeze(0)
-                                current_key = key_proj(output)
-                                if len(hidden_state_relevant_list_rnn) > 0:
-                                    current_query = query_proj(output) # bsz, hidden_size
-                                    attn_weights = torch.bmm(past_keys, current_query.unsqueeze(-1)) # bsz, len, 1
-                                    attn_probs = attn_weights.softmax(dim=1)
-                                    attn_probs = attn_probs.squeeze(-1).unsqueeze(1)
-                                    c = torch.bmm(attn_probs, past_keys).squeeze(1)
-                                if past_keys is None:
-                                    past_keys = current_key.unsqueeze(1)
-                                else:
-                                    past_keys = torch.cat((past_keys, current_key.unsqueeze(1)), dim=1)
-
-                                output = out_proj(torch.cat((output, c), dim=-1))
-
-                                hidden_state_relevant_list_rnn.append(output)
-                        else:
-                            rnn_state = None
-                            #import pdb; pdb.set_trace()
-                            for z in zs: # z: batch, hidden
-                                output, rnn_state = rnn(z.unsqueeze(0), rnn_state)
-                                hidden_state_relevant_list_rnn.append(output.squeeze(0))
+                        rnn_state = None
+                        #import pdb; pdb.set_trace()
+                        for z in zs: # z: batch, hidden
+                            output, rnn_state = rnn(z.unsqueeze(0), rnn_state)
+                            hidden_state_relevant_list_rnn.append(output.squeeze(0))
                     else:
                         hidden_state_relevant_list_rnn = zs
+                    #outputs_nocot = model.forward_zs(input_ids=input_ids_nocot, zs=hidden_state_relevant_list_rnn, first_ids=first_ids, clone=True)
                     outputs_nocot = model.forward_zs(input_ids=input_ids_nocot, zs=hidden_state_relevant_list_rnn, first_ids=first_ids)
                 elif feed == 'p':
                     if use == 'argmin':
-                        outputs_nocot = model.forward_zs_feedp_argmin_predicttoken(input_ids=input_ids_nocot, zs=hidden_state_relevant_list, first_ids=first_ids, rnn=rnn, mlps=mlps, relevant_tokens=relevant_tokens, mixture_components=mixture_components, key_proj=key_proj, query_proj=query_proj, out_proj=out_proj)
+                        outputs_nocot = model.forward_zs_feedp_argmin_predicttoken(input_ids=input_ids_nocot, zs=hidden_state_relevant_list, first_ids=first_ids, rnn=rnn, mlps=mlps, relevant_tokens=relevant_tokens, mixture_components=mixture_components)
                     elif use == 'pred':
-                        outputs_nocot = model.forward_zs_feedp_pred_predicttoken(input_ids=input_ids_nocot, zs=None, first_ids=first_ids, rnn=rnn, mlps=mlps, relevant_tokens=relevant_tokens, mixture_components=mixture_components, key_proj=key_proj, query_proj=query_proj, out_proj=out_proj)
+                        outputs_nocot = model.forward_zs_feedp_pred_predicttoken(input_ids=input_ids_nocot, zs=None, first_ids=first_ids, rnn=rnn, mlps=mlps, relevant_tokens=relevant_tokens, mixture_components=mixture_components)
                     else:
                         assert False
                 else:
@@ -223,8 +179,6 @@ def evaluate(no_mixture, key_proj, query_proj, out_proj, layer_norm, model, mode
             zs_p = get_relevant_zs(zs_p, zs_q, mode)
             kl_i = 0
             weight = mixture_components.weight # vocab, hidden_size
-            if print_eqns:
-                eqns = [[] for _ in range(batch_size)]
             for z, zp, sigma_i, mlp in zip(zs_q, zs_p, sigmas, mlps):
                 #import pdb; pdb.set_trace()
                 c = zp # bsz, hidden_size
@@ -239,9 +193,6 @@ def evaluate(no_mixture, key_proj, query_proj, out_proj, layer_norm, model, mode
                 log_probs = c @ weight.T # bsz, vocab
                 log_probs = log_probs.log_softmax(dim=-1)
                 relevant_tokens_i_pred = log_probs.argmax(-1)
-                if print_eqns:
-                    for bid in range(batch_size):
-                        eqns[bid].append(relevant_tokens_i_pred[bid].item())
                 relevant_proj_pred = mixture_components(relevant_tokens_i_pred) # bsz, hidden_size
                 zps_pred = mlp(torch.cat((zp, relevant_proj_pred), dim=-1)) # bsz, hidden_size
                 diff_pred = zps_pred - z
@@ -279,74 +230,17 @@ def evaluate(no_mixture, key_proj, query_proj, out_proj, layer_norm, model, mode
             # TODO: generate and evaluate accuracy
             # activate beam search and early_stopping
             #import pdb; pdb.set_trace()
-            no_brackets = False
-            no_brackets = True
-            def is_finished(eqn):
-                return eqn[-1] == 50256
-            def is_valid(eqn):
-                es = eqn.split(' ')
-                for e in es:
-                    if no_brackets:
-                        m = re.match(r'.*?=.*?', e)
-                    else:
-                        m = re.match(r'<<.*?=.*?>>', e)
-                    if not m:
-                        return False
-                return True
 
-            def extract_final_ans(s):
-                if no_brackets:
-                    m = re.match(r'.*=(.*)', s)
-                else:
-                    m = re.match(r'.*=(.*)>>', s)
-                if not m:
-                    return None
-                return m.group(1)
-
-
-
-            for i, input_ids_single in enumerate(input_ids_cot):
+            for i, input_ids_single in enumerate(input_ids_nocot):
                 total_instances += 1
-                if print_eqns:
-                    #import pdb; pdb.set_trace()
-                    eqn = tokenizer.decode(eqns[i], skip_special_tokens=True).strip()
-                    sep_idx = input_ids_single.tolist().index(tokenizer.eos_token_id)
-                    src = input_ids_single[:sep_idx+1]
-                    src_text = tokenizer.decode(src)
-                    tgt = input_ids_single[sep_idx+1:]
+        ##TODO        sep_idx = input_ids_single.tolist().index(tokenizer.eos_token_id)
+        ##TODO        src = input_ids_single[:sep_idx+1]
+        ##TODO        tgt = input_ids_single[sep_idx+1:]
 
-                    sep_idx = tgt.tolist().index(tokenizer.eos_token_id)
-                    tgt = tgt[:sep_idx]
-                    tgt_text = tokenizer.decode(tgt)
-                    ans = extract_answer(tgt_text)
-                    print (f'pred: {eqn}')
-                    print (f'gt:   {ans}')
-                    if not is_valid(ans):
-                        continue
-                    ans_es = ans.split(' ')
-                    num_es_ans = len(ans_es)
-                    if not is_finished(eqns[i]):
-                        total_unfinished += 1
-                    else:
-                        total_finished += 1
-                        if not is_valid(eqn):
-                            total_invalid += 1
-                        else:
-                            total_valid += 1
-                            total_eqns[num_es_ans] += 1
-                            es = eqn.split(' ')
-                            final_ans_gt = extract_final_ans(ans_es[-1])
-                            final_ans_pred = extract_final_ans(es[-1])
-                            if final_ans_gt == final_ans_pred:
-                                final_match_eqns[num_es_ans] += 1
-                                if len(es) == len(ans_es):
-                                    flag = True
-                                    for e, ans_e in zip(es, ans_es):
-                                        if e != ans_e:
-                                            flag = False
-                                            break
-                                    if flag:
-                                        full_match_eqns[num_es_ans] += 1
+        ##TODO        sep_idx = tgt.tolist().index(tokenizer.eos_token_id)
+        ##TODO        tgt = tgt[:sep_idx]
+        ##TODO        tgt_text = tokenizer.decode(tgt)
+        ##TODO        ans = extract_answer(tgt_text)
 
         ##TODO        with torch.no_grad():
         ##TODO            with ctx:
@@ -374,23 +268,6 @@ def evaluate(no_mixture, key_proj, query_proj, out_proj, layer_norm, model, mode
         ##TODO        if ans == pred_ans:
         ##TODO            total_correct += 1
         ##TODO    #break
-        if print_eqns:
-            #import pdb; pdb.set_trace()
-            if total_finished + total_unfinished > 0:
-                print (f'finished: {total_finished / (total_finished + total_unfinished)} ({total_finished} out of {total_finished + total_unfinished})')
-                if total_finished > 0:
-                    print (f'valid: {total_valid / (total_valid + total_invalid)} ({total_valid} out of {total_valid + total_invalid})')
-                    theo_correct = 0
-                    for num_digit in final_match_eqns:
-                        theo_correct += final_match_eqns[num_digit]
-                    print (f'theoretically correct: {theo_correct / (total_instances)} ({theo_correct} out of {total_instances})')
-
-                    for num_digit in [1, 2, 3, 4]:
-                        if total_eqns[num_digit] == 0:
-                            continue
-                        print (f'digit: {num_digit} {total_eqns[num_digit] / total_valid} ({total_eqns[num_digit]} out of {total_valid})')
-                        print (f'  - ans match: {final_match_eqns[num_digit] / total_eqns[num_digit]} ({final_match_eqns[num_digit]} out of {total_eqns[num_digit]})')
-                        print (f'  - full match: {full_match_eqns[num_digit] / max(final_match_eqns[num_digit], 1)} ({full_match_eqns[num_digit]} out of {final_match_eqns[num_digit]})')
 
         word_accuracy = word_correct / total
         accuracy = total_correct / total_instances
@@ -431,7 +308,6 @@ def main():
     parser.add_argument('--train_path', type=str, default='data/math_scaffolding_formula/src1_train.txt')
     parser.add_argument('--val_path', type=str, default='data/math_scaffolding_formula/src1_valid.txt')
     parser.add_argument('--test_path', type=str, default='data/math_scaffolding_formula/src1_test.txt')
-    parser.add_argument('--eval_path', type=str, default=None)
     parser.add_argument('--epochs', type=int, default=5)
     parser.add_argument('--batch_size', type=int, default=5)
     parser.add_argument('--accumulate', type=int, default=1)
@@ -448,12 +324,7 @@ def main():
     parser.add_argument('--use', type=str, choices=['argmin', 'pred', 'gt'], default='argmin')
     parser.add_argument('--compile', type=int, default=1)
     parser.add_argument('--no_save', type=int, default=0)
-    parser.add_argument('--no_layernorm', type=int, default=0)
-    parser.add_argument('--no_mixture', type=int, default=0)
-    parser.add_argument('--use_attn', type=int, default=0)
-    parser.add_argument('--load_model', type=int, default=0)
     parser.add_argument('--use_rnn', type=int, default=1)
-    parser.add_argument('--eval_only', type=int, default=0)
     parser.add_argument('--last_id_minus', type=int, default=0)
     parser.add_argument('--interval', type=int, default=-1)
     parser.add_argument('--mixture_size', type=int, default=32)
@@ -473,7 +344,7 @@ def main():
     print (args.qmodel)
     model = AutoModelForCausalLM.from_pretrained(args.model).to(device).to(ptdtype)
     if args.compile == 1:
-        #model = torch.compile(model)
+        model = torch.compile(model)
         model_q = torch.compile(model_q)
     else:
         print ('WARNING: no compile!')
@@ -501,34 +372,10 @@ def main():
              nn.Linear(hidden_size_mid, hidden_size_out * a),
              ) for _ in range(num_layers)]).to(device).to(ptdtype)
     mixture_components = nn.Embedding(len(tokenizer), hidden_size_out).to(device).to(ptdtype)
-    layer_norm = nn.LayerNorm(hidden_size_out, elementwise_affine=False).to(device).to(ptdtype)
-    if args.no_layernorm == 1:
-        print ('NO LAYERNORM')
-        layer_norm = nn.Identity()
     if args.use_rnn == 1:
         rnn = nn.LSTM(input_size=hidden_size_in, hidden_size=hidden_size_in, num_layers=1, batch_first=False, dropout=0, bidirectional=False).to(device).to(ptdtype)
     else:
         rnn = None
-
-    if args.use_attn == 1:
-        assert args.use_rnn == 1
-        key_proj = nn.Linear(hidden_size_in, hidden_size_out).to(device).to(ptdtype)
-        query_proj = nn.Linear(hidden_size_in, hidden_size_out).to(device).to(ptdtype)
-        out_proj = nn.Linear(hidden_size_out*2, hidden_size_out).to(device).to(ptdtype)
-    else:
-        key_proj, query_proj, out_proj = None, None, None
-
-    if args.load_model == 1:
-        print ('LOADING MODEL')
-        mlps.load_state_dict(torch.load(os.path.join(args.model, 'mlps.pt')))
-        mixture_components.load_state_dict(torch.load(os.path.join(args.model, 'mixture_components.pt')))
-        if rnn is not None:
-            rnn.load_state_dict(torch.load(os.path.join(args.model, 'rnn.pt')))
-        if key_proj is not None:
-            key_proj.load_state_dict(torch.load(os.path.join(args.model, 'key_proj.pt')))
-            query_proj.load_state_dict(torch.load(os.path.join(args.model, 'query_proj.pt')))
-            out_proj.load_state_dict(torch.load(os.path.join(args.model, 'out_proj.pt')))
-
     #mlps_patch = nn.ModuleList([nn.Sequential(
     #         nn.Linear(hidden_size_in, hidden_size_mid),
     #         nn.ReLU(),
@@ -552,11 +399,6 @@ def main():
         all_parameters = list(model.parameters()) + list(mlps.parameters()) + list(rnn.parameters()) + list(mixture_components.parameters())
     else:
         all_parameters = list(model.parameters()) + list(mlps.parameters()) + list(mixture_components.parameters())
-
-    if key_proj is not None:
-        all_parameters.extend(list(key_proj.parameters()))
-        all_parameters.extend(list(query_proj.parameters()))
-        all_parameters.extend(list(out_proj.parameters()))
     optimizer = torch.optim.AdamW(all_parameters, lr=args.lr, **extra_args)
     #optimizer_sigmas = torch.optim.SGD([sigmas], lr=args.lr)
     #optimizer = torch.optim.SGD([sigmas] + list(model.parameters())+list(model_q.parameters()), lr=args.lr)
@@ -570,12 +412,6 @@ def main():
     test_dataset = CoTVAEDataset(tokenizer, args.test_path, 1024)
     test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True)
 
-    if args.eval_path is not None:
-        eval_dataset = CoTVAEDataset(tokenizer, args.eval_path, 1024)
-        eval_dataloader = DataLoader(eval_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True)
-    else:
-        eval_dataloader = None
-
     torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
     torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
     # note: float16 data type will automatically use a GradScaler
@@ -585,16 +421,13 @@ def main():
 
     #accuracy, word_accuracy, ppl = evaluate(model, model_q, val_dataloader, tokenizer, ctx, sigmas)
     #print (f'Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
-    setting_dataloaders = [('val', val_dataloader), ('test', test_dataloader)]
-    if eval_dataloader is not None:
-        setting_dataloaders.append(('eval', eval_dataloader))
     if True:
-        for setting, dataloader in setting_dataloaders:
+        for setting, dataloader in [('val', val_dataloader), ('test', test_dataloader)]:
             for feed, use in [('q', 'gt'), ('p', 'argmin'), ('p', 'pred')]: #, (), (), ()]:
                 print ('*'*10)
                 print (setting)
                 print (f'feed: {feed}, use: {use}')
-                ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy, loss_kls, loss_kls_mixture, loss_kls_mixture_pred, loss_probs_mixture, loss_ranks_mixture, loss_kl_pred, loss_kls_pred = evaluate(args.no_mixture, key_proj, query_proj, out_proj, layer_norm, model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mixture_components, rnn, args.mode, args.follow, interval_arg=args.interval, mixture_size=args.mixture_size, feed=feed, use=use, last_id_minus=args.last_id_minus, print_eqns=(args.load_model==1))#, mlps_patch)
+                ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy, loss_kls, loss_kls_mixture, loss_kls_mixture_pred, loss_probs_mixture, loss_ranks_mixture, loss_kl_pred, loss_kls_pred = evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mixture_components, rnn, args.mode, args.follow, interval_arg=args.interval, mixture_size=args.mixture_size, feed=feed, use=use, last_id_minus=args.last_id_minus)#, mlps_patch)
                 #return ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, loss_kls, loss_kls_mixture, loss_kls_mixture_pred, loss_probs_mixture, loss_ranks_mixture
                 print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Accuracy: {accuracy}. KL pred: {loss_kl_pred}")
                 loss_kls = [ '%.2f' % elem for elem in loss_kls.tolist() ]
@@ -612,8 +445,6 @@ def main():
                 print ('='*10)
     #model.train()
     #model_q.train()
-    if args.eval_only == 1:
-        sys.exit(0)
     model.eval()
     model_q.eval()
 
@@ -623,7 +454,7 @@ def main():
     #import pdb; pdb.set_trace()
     for epoch in range(args.epochs):
         if args.no_save != 1:
-            save_model(key_proj, query_proj, out_proj, model, mlps, mixture_components, rnn, tokenizer, f'{args.save_model}/checkpoint_{epoch}_{args.lr}')
+            save_model(model, mlps, mixture_components, rnn, tokenizer, f'{args.save_model}/checkpoint_{epoch}_{args.lr}')
         print(f"Epoch {epoch}") #TODO change epoch
 
         #model.save_pretrained("finetuned_gpt2")
@@ -693,21 +524,19 @@ def main():
                     relevant_ids[batch_id] = ids
                 #import pdb; pdb.set_trace()
                 relevant_tokens = input_ids_cot.gather(1, relevant_ids)
-                if args.no_mixture == 1:
-                    relevant_tokens = relevant_tokens * 0
 
                 # time to compute q
                 hidden_state_relevant_list = []
                 zs0 = []
                 for i, hidden_states in enumerate(hidden_states_cot[:-1]):
                     if args.follow == 'diagonal' or args.follow == 'diagonal_orig' or args.follow == 'first_column' or args.follow == 'last_column':
-                        hidden_state_relevant = layer_norm(hidden_states.gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                        hidden_state_relevant = (hidden_states.gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
                     elif args.follow == 'top_row':
-                        hidden_state_relevant = layer_norm(hidden_states_cot[-2].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                        hidden_state_relevant = (hidden_states_cot[-2].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
                     elif args.follow == 'bottom_row':
-                        hidden_state_relevant = layer_norm(hidden_states_cot[0].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                        hidden_state_relevant = (hidden_states_cot[0].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
                     elif args.follow == 'bottom_row_above':
-                        hidden_state_relevant = layer_norm(hidden_states_cot[1].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
+                        hidden_state_relevant = (hidden_states_cot[1].gather(1, relevant_ids[:,i:(i+1)].unsqueeze(-1).expand(-1, -1, hidden_size)).squeeze(1))
                     else:
                         assert False
                     #zs0.append(hidden_state_relevant)
@@ -720,44 +549,18 @@ def main():
                 if args.feed == 'q':
                     hidden_state_relevant_list_rnn = []
                     if rnn is not None:
-                        if key_proj is not None:
-                            rnn_state = None
-                            c = None
-                            #import pdb; pdb.set_trace()
-                            for z in zs: # z: batch, hidden
-                                if c is None:
-                                    c = z.new_zeros(z.shape)
-                                output, rnn_state = rnn((z+c).unsqueeze(0), rnn_state)
-                                output = output.squeeze(0)
-                                current_key = key_proj(output)
-                                if len(hidden_state_relevant_list_rnn) > 0:
-                                    current_query = query_proj(output) # bsz, hidden_size
-                                    attn_weights = torch.bmm(past_keys, current_query.unsqueeze(-1)) # bsz, len, 1
-                                    attn_probs = attn_weights.softmax(dim=1)
-                                    attn_probs = attn_probs.squeeze(-1).unsqueeze(1)
-                                    c = torch.bmm(attn_probs, past_keys).squeeze(1)
-                                if past_keys is None:
-                                    past_keys = current_key.unsqueeze(1)
-                                else:
-                                    past_keys = torch.cat((past_keys, current_key.unsqueeze(1)), dim=1)
-
-                                output = out_proj(torch.cat((output, c), dim=-1))
-
-                                hidden_state_relevant_list_rnn.append(output)
-                        else:
-                            rnn_state = None
-                            #import pdb; pdb.set_trace()
-                            for z in zs: # z: batch, hidden
-                                output, rnn_state = rnn(z.unsqueeze(0), rnn_state)
-                                hidden_state_relevant_list_rnn.append(output.squeeze(0))
+                        rnn_state = None
+                        for z in zs: # z: batch, hidden
+                            output, rnn_state = rnn(z.unsqueeze(0), rnn_state)
+                            hidden_state_relevant_list_rnn.append(output.squeeze(0))
                     else:
                         hidden_state_relevant_list_rnn = zs
                     outputs_nocot = model.forward_zs(input_ids=input_ids_nocot, zs=hidden_state_relevant_list_rnn, first_ids=first_ids, clone=True)
                 elif args.feed == 'p':
                     if args.use == 'argmin':
-                        outputs_nocot = model.forward_zs_feedp_argmin_predicttoken(input_ids=input_ids_nocot, zs=hidden_state_relevant_list, first_ids=first_ids, clone=True, rnn=rnn, mlps=mlps, relevant_tokens=relevant_tokens,  mixture_components=mixture_components, key_proj=key_proj, query_proj=query_proj, out_proj=out_proj)
+                        outputs_nocot = model.forward_zs_feedp_argmin_predicttoken(input_ids=input_ids_nocot, zs=hidden_state_relevant_list, first_ids=first_ids, clone=True, rnn=rnn, mlps=mlps, relevant_tokens=relevant_tokens,  mixture_components=mixture_components)
                     elif args.use == 'pred':
-                        outputs_nocot = model.forward_zs_feedp_pred_predicttoken(input_ids=input_ids_nocot, zs=None, first_ids=first_ids, clone=True, rnn=rnn, mlps=mlps, relevant_tokens=relevant_tokens, mixture_components=mixture_components, key_proj=key_proj, query_proj=query_proj, out_proj=out_proj)
+                        outputs_nocot = model.forward_zs_feedp_pred_predicttoken(input_ids=input_ids_nocot, zs=None, first_ids=first_ids, clone=True, rnn=rnn, mlps=mlps, relevant_tokens=relevant_tokens, mixture_components=mixture_components)
                     else:
                         assert False
                 else:
@@ -891,11 +694,8 @@ def main():
                 ###torch.nn.utils.clip_grad_norm_(mlps.parameters(), args.max_grad_norm)
                 ###torch.nn.utils.clip_grad_norm_(rnn.parameters(), args.max_grad_norm)
                 #import pdb; pdb.set_trace()
-                if rnn is not None and (step < 100 or (args.no_layernorm == 1)):
-                    all_modules = [rnn, model, mlps, mixture_components]
-                    if key_proj is not None:
-                        all_modules.extend([key_proj, query_proj, out_proj])
-                    for module in all_modules:
+                if rnn is not None and step < 100:
+                    for module in [rnn, model, mlps, mixture_components]:
                         for n, p in module.named_parameters():
                             if p.grad is not None:
                                 if p.grad.isinf().any():
@@ -983,7 +783,7 @@ def main():
                 print ('*'*10)
                 print (setting)
                 print (f'feed: {feed}, use: {use}')
-                ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy, loss_kls, loss_kls_mixture, loss_kls_mixture_pred, loss_probs_mixture, loss_ranks_mixture, loss_kl_pred, loss_kls_pred = evaluate(args.no_mixture, key_proj, query_proj, out_proj, layer_norm, model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mixture_components, rnn, args.mode, args.follow, interval_arg=args.interval, mixture_size=args.mixture_size, feed=feed, use=use, last_id_minus=args.last_id_minus)#, mlps_patch)
+                ppl, loss, ppl_nll, loss_nll, loss_kl, accuracy, loss_kls, loss_kls_mixture, loss_kls_mixture_pred, loss_probs_mixture, loss_ranks_mixture, loss_kl_pred, loss_kls_pred = evaluate(model, model_q, dataloader, tokenizer, ctx, sigmas, mlps, mixture_components, rnn, args.mode, args.follow, interval_arg=args.interval, mixture_size=args.mixture_size, feed=feed, use=use, last_id_minus=args.last_id_minus)#, mlps_patch)
                 #return ppl, loss, ppl_nll, loss_nll, loss_kl, word_accuracy, loss_kls, loss_kls_mixture, loss_kls_mixture_pred, loss_probs_mixture, loss_ranks_mixture
                 print (f"Val. PPL: {ppl}. Loss: {loss}. PPL0: {ppl_nll}. NLL: {loss_nll}. KL: {loss_kl}. Accuracy: {accuracy}. KL pred: {loss_kl_pred}")
                 loss_kls = [ '%.2f' % elem for elem in loss_kls.tolist() ]

@@ -288,9 +288,9 @@ export MODE=bottom
 export FOLDER=sharps_200kaugmented_math_scaffolding_formula
 export QMODEL=/n/holyscratch01/rush_lab/Users/yuntian/implicit/200kaugmented_math_scaffolding_formula_cot_gpt2_repharvard_100k/checkpoint_14_5e-05_gpt2
 export MODELSAVE="${MODEL////_}"
-export SAVE=200kprelayernorm/phase0/interval${INTERVAL}/nornn/gptsmall/r${R}_m${MODE}_e${EPOCHS}_f${F}_minus${MINUS}
+export SAVE=rmlayernorm_200kprelayernorm/phase0/interval${INTERVAL}/nornn/gptsmall/r${R}_m${MODE}_e${EPOCHS}_f${F}_minus${MINUS}
 mkdir -p $SAVE
-TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=2 stdbuf -oL -eL python train_phase0_fixq_math_fixed_interval_mlp_normgrad_nores_prelayernorm.py \
+TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=1 stdbuf -oL -eL python train_phase0_fixq_math_fixed_interval_mlp_normgrad_nores_prelayernorm_rmlayernorm.py \
     --train_path data/${FOLDER}/src1_train.txt.1000plus \
     --val_path data/${FOLDER}/src1_valid.txt \
     --test_path data/${FOLDER}/src1_train.txt.1000 \

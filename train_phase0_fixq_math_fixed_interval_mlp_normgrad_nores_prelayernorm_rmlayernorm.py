@@ -359,7 +359,6 @@ def main():
     hidden_size_out = model.config.hidden_size
     hidden_size_mid = 4 * max(hidden_size_in, hidden_size_out)
     mlps = nn.ModuleList([nn.Sequential(
-             nn.LayerNorm(hidden_size_out, elementwise_affine=False),
              nn.Linear(hidden_size_in, hidden_size_mid),
              nn.ReLU(),
              nn.Linear(hidden_size_mid, hidden_size_out),
