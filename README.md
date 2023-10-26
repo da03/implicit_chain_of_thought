@@ -9,7 +9,7 @@ Here we provide code to reproduce our results.
 
 ## Datasets & Pretrained Models & Logs
 
-All dataset files and log files during inference are included in this repo, with the exception of large training files maintained using Git LFS. Model checkpoints are stored on Google Drive. The folder containing all checkpoints can be found at [this link](https://drive.google.com/drive/folders/1ftYOXtC1ZtxYykwMGGPW24n8L1tuFvOK?usp=sharing)
+All dataset files and log files during inference are included in this repo, with the exception of large training files maintained using Git LFS. Model checkpoints are stored on Google Drive. The folder containing all checkpoints can be found at [this link](https://drive.google.com/drive/folders/1ftYOXtC1ZtxYykwMGGPW24n8L1tuFvOK?usp=sharing).
 
 * 4 X 4 Mult - GPT-2: [data](data/4_by_4_mult/) [model]() [log](logs/4_by_4_mult/gpt2/log.generate)
 * 4 X 4 Mult - GPT-2 Medium: [data](data/4_by_4_mult/) [model]() [log](logs/4_by_4_mult/gpt2-medium/log.generate)
@@ -36,12 +36,14 @@ We use 5 X 5 Mult as an example.
 
 ### Generation & Evaluation
 
+Here we use a pretrained model as an example. Download the folder `models/5_by_5_mult/gpt2-medium`, then the following command will run inference and evaluate both accuracy and throughput, logged in file `generation_logs/5_by_5_mult/log.generate`.
+
 ```
 export FOLDER=data/5_by_5_mult
 export STUDENT=models/5_by_5_mult/gpt2-medium/student
 export EMULATOR=models/5_by_5_mult/gpt2-medium/emulator
 export BSZ=1
-export SAVE=logs/5_by_5_mult
+export SAVE=generation_logs/5_by_5_mult
 mkdir -p $SAVE
 TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python src/generate.py \
     --batch_size $BSZ \
