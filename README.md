@@ -5,7 +5,7 @@ Here we provide code to reproduce our results.
 ## Prerequisites
 
 * [PyTorch](https://pytorch.org/get-started/locally/)
-* [transformers](https://github.com/huggingface/transformers)
+* [transformers](https://github.com/huggingface/transformers) (`pip install transformers`)
 
 ## Datasets & Pretrained Models & Logs
 
@@ -20,11 +20,16 @@ Here we provide code to reproduce our results.
 
 We use 5 X 5 Mult as an example.
 
-### Data Preprocessing
-
 
 ### Training
 
+#### 0. Teacher Training
+
+#### 1. Mind-Reading the Teacher
+
+#### 2. Thought Emulation
+
+#### 3. Couple and Optimize
 
 
 ### Generation & Evaluation
