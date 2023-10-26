@@ -2,7 +2,7 @@ export FOLDER=/n/holyscratch01/rush_lab/Users/yuntian/implicit/final_release/dat
 export STUDENT=/n/holyscratch01/rush_lab/Users/yuntian/implicit/final_release/models/5_by_5_mult/gpt2-medium/student
 export EMULATOR=/n/holyscratch01/rush_lab/Users/yuntian/implicit/final_release/models/5_by_5_mult/gpt2-medium/emulator
 export BSZ=1
-export SAVE=outputs/5_by_5_mult
+export SAVE=logs/5_by_5_mult
 mkdir -p $SAVE
 TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python src/generate.py \
     --batch_size $BSZ \

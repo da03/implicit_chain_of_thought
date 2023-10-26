@@ -4,25 +4,17 @@ Here we provide code to reproduce our results.
 
 ## Prerequisites
 
-* [Pytorch](https://pytorch.org/get-started/locally/)
-
-We also need a custom version of Hugging Face's transformers library.
-
-```
-git clone https://github.com/da03/implicit_transformers.git
-cd implicit_transformers
-pip install --editable .
-```
+* [PyTorch](https://pytorch.org/get-started/locally/)
+* [transformers](https://github.com/huggingface/transformers)
 
 ## Datasets & Pretrained Models & Logs
 
-* 4 X 4 Mult: [data]() [model]() [log]()
-* 5 X 5 Mult: [data]() [model]() [log]()
-* GSM8K-Aug: [data]() [model]() [log]()
+* 4 X 4 Mult: [data](data/4_by_4_mult/) [model]() [log](logs/4_by_4_mult/log.generate)
+* 5 X 5 Mult: [data](data/5_by_5_mult/) [model]() [log](logs/5_by_5_mult/log.generate)
 
 ## Usage
 
-We use 4 X 4 Mult as an example.
+We use 5 X 5 Mult as an example.
 
 ### Data Preprocessing
 
@@ -33,15 +25,20 @@ We use 4 X 4 Mult as an example.
 
 ### Generation & Evaluation
 
-
-
 ```
+export FOLDER=data/5_by_5_mult
+export STUDENT=models/5_by_5_mult/gpt2-medium/student
+export EMULATOR=models/5_by_5_mult/gpt2-medium/emulator
+export BSZ=1
+export SAVE=logs/5_by_5_mult
+mkdir -p $SAVE
+TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python src/generate.py \
+    --batch_size $BSZ \
+    --test_path ${FOLDER}/test_bigbench.txt \
+    --student_path $STUDENT \
+    --emulator_path $EMULATOR \
+    > ${SAVE}/log.generate 2>&1&
 ```
-
-## Multiple Reasoning Pathways (GSM8K-Aug)
-
-### Training
-
 
 ## Citation
 
