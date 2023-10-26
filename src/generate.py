@@ -66,9 +66,9 @@ def evaluate(dataloader, tokenizer, ctx, emulator, student):
             sep_position = sep_positions[i].item()
             tgt = input_ids_all_i[sep_position+1:]
             tgt_text = tokenizer.decode(tgt, skip_special_tokens=True)
-            ans = tgt_text.strip()
+            ans = extract_answer(tgt_text)
             pred_text = tokenizer.decode(beam_output_i[0][sep_position+1:], skip_special_tokens=True)
-            pred_ans = pred_text.strip() #.split()[-1] #extract_answer(pred_text)
+            pred_ans = extract_answer(pred_text)
             #import pdb; pdb.set_trace()
             total_instances += 1
             if ans == pred_ans:

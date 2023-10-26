@@ -39,6 +39,7 @@ class Emulator(nn.Module):
         outputs = self.base_model.forward(mode='forward_emulator', \
                 input_ids=input_ids, \
                 positions_to_take=sep_positions, \
+                softmax_temperature=self.config.softmax_temperature,
                 rnn=self.rnn, \
                 mlps=self.mlps, \
                 mixture_components=self.mixture_components, \
