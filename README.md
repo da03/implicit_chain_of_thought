@@ -9,8 +9,12 @@ Here we provide code to reproduce our results.
 
 ## Datasets & Pretrained Models & Logs
 
-* 4 X 4 Mult: [data](data/4_by_4_mult/) [model]() [log](logs/4_by_4_mult/log.generate)
-* 5 X 5 Mult: [data](data/5_by_5_mult/) [model]() [log](logs/5_by_5_mult/log.generate)
+* 4 X 4 Mult - GPT-2: [data](data/4_by_4_mult/) [model]() [log](logs/4_by_4_mult/gpt2/log.generate)
+* 4 X 4 Mult - GPT-2 Medium: [data](data/4_by_4_mult/) [model]() [log](logs/4_by_4_mult/gpt2-medium/log.generate)
+* 5 X 5 Mult - GPT-2: [data](data/5_by_5_mult/) [model]() [log](logs/5_by_5_mult/gpt2/log.generate)
+* 5 X 5 Mult - GPT-2 Medium: [data](data/5_by_5_mult/) [model]() [log](logs/5_by_5_mult/gpt2-medium/log.generate)
+* GSM8K - GPT-2: [data](data/5_by_5_mult/) [model]() [log](logs/gsm8k/gpt2/log.generate)
+* GSM8K - GPT-2 Medium: [data](data/5_by_5_mult/) [model]() [log](logs/gsm8k/gpt2-medium/log.generate)
 
 ## Usage
 
