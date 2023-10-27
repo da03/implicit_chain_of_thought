@@ -20,12 +20,34 @@ All dataset files and log files during inference are included in this repo, with
 
 ## Usage
 
-We use 4 X 4 Mult with GPT2-Small as an example.
+We use 4 X 4 Mult with GPT2-Small as an example. We assume that the working directory is `implicit_chain_of_thought` throughout this document.
 
+### Data Format
+
+The format of training, validation, and test files looks like below:
+
+```
+[input 1]||[chain-of-thought 1] #### [output 1]
+[input 2]||[chain-of-thought 2] #### [output 3]
+[input 3]||[chain-of-thought 2] #### [output 3]
+...
+```
+
+As an example, let's take a look at the first line from the 4 X 4 Mult test set in [data/4_by_4_mult/test_bigbench.txt](data/4_by_4_mult/test_bigbench.txt):
+
+```
+9 1 7 3 * 9 4 3 3||1 7 4 3 3 + 0 6 7 8 4 1 ( 1 3 2 2 8 1 ) + 0 0 7 5 1 1 1 ( 1 3 9 7 9 2 1 ) + 0 0 0 7 5 1 1 1 #### 1 3 9 4 5 4 2 1
+```
+
+In this line, the input is `9 1 7 3 * 9 4 3 3` (corresponding to `3719*3349`), the chain-of-thought is `1 7 4 3 3 + 0 6 7 8 4 1 ( 1 3 2 2 8 1 ) + 0 0 7 5 1 1 1 ( 1 3 9 7 9 2 1 ) + 0 0 0 7 5 1 1 1`, and the output is `1 3 9 4 5 4 2 1` (corresponding to `12454931`).
+
+Note that for Teacher Training, (a) Mind-Reading the Teacher, and (b) Thought Emulation, the chain-of-thought steps are used; but for (c) Couple and Optimize the chain-of-thought steps are not used.
 
 ### Training
 
 #### Prerequisite: Teacher Training
+
+Our approach is based on distilling a teacher models horizontal reasoning process into the vertical reasoning process of the emulator and the student. Therefore, we need to first train a teacher on the task of explicit chain-of-thought reasoning.
 
 ```
 export FOLDER=data/4_by_4_mult
