@@ -20,12 +20,33 @@ All dataset files and log files during inference are included in this repo, with
 
 ## Usage
 
-We use 5 X 5 Mult as an example.
+We use 4 X 4 Mult with GPT2-Small as an example.
 
 
 ### Training
 
 #### 0. Teacher Training
+
+```
+export FOLDER=data/4_by_4_mult
+export MODEL=gpt2
+export EPOCHS=1
+export LR=5e-5
+export BSZ=32
+export SAVE=train_models/4_by_4_mult/gpt2/teacher
+echo $SAVE
+mkdir -p $SAVE
+TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python train_teacher.py \
+    --train_path data/${FOLDER}/train.txt \
+    --val_path data/${FOLDER}/valid.txt \
+    --test_path data/${FOLDER}/test_bigbench.txt \
+    --epochs $EPOCHS \
+    --lr $LR \
+    --model $MODEL \
+    --batch_size $BSZ \
+    --save_model $SAVE \
+    > ${SAVE}/log.train 2>&1&
+```
 
 #### 1. Mind-Reading the Teacher
 
@@ -36,14 +57,14 @@ We use 5 X 5 Mult as an example.
 
 ### Generation & Evaluation
 
-Here we use a pretrained model as an example. Download the folder `models/5_by_5_mult/gpt2-medium`, then the following command will run inference and evaluate both accuracy and throughput, logged in file `generation_logs/5_by_5_mult/log.generate`.
+Here we use a pretrained model as an example. Download the folder `models/4_by_4_mult/gpt2`, then the following command will run inference and evaluate both accuracy and throughput, logged in file `generation_logs/4_by_4_mult/log.generate`.
 
 ```
-export FOLDER=data/5_by_5_mult
-export STUDENT=models/5_by_5_mult/gpt2-medium/student
-export EMULATOR=models/5_by_5_mult/gpt2-medium/emulator
+export FOLDER=data/4_by_4_mult
+export STUDENT=models/4_by_4_mult/gpt2/student
+export EMULATOR=models/4_by_4_mult/gpt2/emulator
 export BSZ=1
-export SAVE=generation_logs/5_by_5_mult
+export SAVE=generation_logs/4_by_4_mult
 mkdir -p $SAVE
 TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python src/generate.py \
     --batch_size $BSZ \
