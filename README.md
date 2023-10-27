@@ -48,7 +48,7 @@ TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python train_
     > ${SAVE}/log.train 2>&1&
 ```
 
-#### a. Mind-Reading the Teacher
+#### (a) Mind-Reading the Teacher
 
 ![](imgs/training_illustration_a.png)
 
@@ -79,7 +79,7 @@ TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python train_
     > ${SAVE}/log.train 2>&1&
 ```
 
-#### b. Thought Emulation
+#### (b) Thought Emulation
 
 ![](imgs/training_illustration_b.png)
 
@@ -119,7 +119,7 @@ CUDA_VISIBLE_DEVICES=3 TOKENIZERS_PARALLELISM=false stdbuf -oL -eL python train_
     > ${SAVE}/log.train 2>&1&
 ```
 
-#### c. Couple and Optimize
+#### (c) Couple and Optimize
 
 ![](imgs/training_illustration_c.png)
 
