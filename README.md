@@ -25,7 +25,7 @@ We use 4 X 4 Mult with GPT2-Small as an example.
 
 ### Training
 
-#### 0. Teacher Training
+#### Prerequisite: Teacher Training
 
 ```
 export FOLDER=data/4_by_4_mult
