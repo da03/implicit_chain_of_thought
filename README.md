@@ -113,10 +113,42 @@ CUDA_VISIBLE_DEVICES=3 TOKENIZERS_PARALLELISM=false stdbuf -oL -eL python train_
     --use_rnn 1 \
     --use_attn 1 \
     --no_mixture 1 \
-    > ${SAVE}/log.train.text.model${MODELSAVE}.folder${FOLDER}.e${EPOCHS}.lr${LR}.${BSZ} 2>&1&
+    > ${SAVE}/log.train 2>&1&
+```
 
 #### 3. Couple and Optimize
 
+```
+export FOLDER=data/4_by_4_mult
+export INTERVAL=0
+export M=1
+export E=6
+export EPOCHS=40
+export LR=5e-5
+export F=diagonal
+export MODEL=/n/holyscratch01/rush_lab/Users/yuntian/implicit/long_mult_4_prelayernorm/phase0/interval0/gpt2/r0_mbottom_e40_fdiagonal_minus0/checkpoint_3_5e-05
+export QMODEL=/n/holyscratch01/rush_lab/Users/yuntian/implicit/long_mult_4_prelayernorm/use_attn_1rnn_predicttoken_prelayernorm/phase1/nomixture/nolegacy/interval0/pw0/gptsmall/m1/feedp_useargmin_lr5e-5_w0_pw0_minus0_fdiagonal/checkpoint_${E}_5e-05
+export BSZ=32
+export A=1
+export T=1
+export SAVE=train_models/4_by_4_mult/gpt2/
+mkdir -p $SAVE
+TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python train_coupled_emulator_and_student.py \
+    --train_path ${FOLDER}/train.txt \
+    --val_path ${FOLDER}/valid.txt \
+    --test_path ${FOLDER}/test_bigbench.txt \
+    --epochs $EPOCHS \
+    --lr $LR \
+    --model $MODEL \
+    --batch_size $BSZ \
+    --qmodel $QMODEL \
+    --save_model $SAVE \
+    --accumulate $A \
+    --mixture_size $M \
+    --additional_norm 0 \
+    --no_mixture 1 \
+    > ${SAVE}/log.train 2>&1&
+```
 
 ### Generation & Evaluation
 
