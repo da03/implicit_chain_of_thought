@@ -1,7 +1,5 @@
 # Implicit Chain of Thought Reasoning via Knowledge Distillation
 
-![](imgs/training_illustration.png)
-
 Here we provide code to reproduce our results.
 
 ## Prerequisites
@@ -50,7 +48,9 @@ TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python train_
     > ${SAVE}/log.train 2>&1&
 ```
 
-#### 1. Mind-Reading the Teacher
+#### a. Mind-Reading the Teacher
+
+![](imgs/training_illustration_a.png)
 
 ```
 export FOLDER=data/4_by_4_mult
@@ -79,7 +79,9 @@ TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python train_
     > ${SAVE}/log.train 2>&1&
 ```
 
-#### 2. Thought Emulation
+#### b. Thought Emulation
+
+![](imgs/training_illustration_b.png)
 
 ```
 export FOLDER=data/4_by_4_mult
@@ -92,7 +94,6 @@ export USE=argmin
 export EPOCHS=40
 export BSZ=32
 export F=diagonal
-export MODELSAVE="${MODEL////_}"
 export QMODEL=train_models/4_by_4_mult/gpt2/teacher/checkpoint_1_5e-05_gpt2
 export SAVE=train_models/4_by_4_mult/gpt2/emulator_initial
 mkdir -p $SAVE
@@ -118,7 +119,9 @@ CUDA_VISIBLE_DEVICES=3 TOKENIZERS_PARALLELISM=false stdbuf -oL -eL python train_
     > ${SAVE}/log.train 2>&1&
 ```
 
-#### 3. Couple and Optimize
+#### c. Couple and Optimize
+
+![](imgs/training_illustration_c.png)
 
 ```
 export FOLDER=data/4_by_4_mult
