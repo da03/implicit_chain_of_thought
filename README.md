@@ -36,7 +36,7 @@ export BSZ=32
 export SAVE=train_models/4_by_4_mult/gpt2/teacher
 echo $SAVE
 mkdir -p $SAVE
-TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python train_teacher.py \
+TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python src/train_teacher.py \
     --train_path data/${FOLDER}/train.txt \
     --val_path data/${FOLDER}/valid.txt \
     --test_path data/${FOLDER}/test_bigbench.txt \
@@ -63,7 +63,7 @@ export BSZ=32
 export QMODEL=train_models/4_by_4_mult/gpt2/teacher/checkpoint_1_5e-05_gpt2
 export SAVE=train_models/4_by_4_mult/gpt2/student_initial
 mkdir -p $SAVE
-TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python train_mind_reading_student.py \
+TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python src/train_mind_reading_student.py \
     --train_path data/${FOLDER}/src1_train.txt \
     --val_path data/${FOLDER}/src1_valid.txt \
     --test_path data/${FOLDER}/src1_test_bigbench.txt \
@@ -97,7 +97,7 @@ export F=diagonal
 export QMODEL=train_models/4_by_4_mult/gpt2/teacher/checkpoint_1_5e-05_gpt2
 export SAVE=train_models/4_by_4_mult/gpt2/emulator_initial
 mkdir -p $SAVE
-CUDA_VISIBLE_DEVICES=3 TOKENIZERS_PARALLELISM=false stdbuf -oL -eL python train_thought_emulator.py \
+CUDA_VISIBLE_DEVICES=3 TOKENIZERS_PARALLELISM=false stdbuf -oL -eL python src/train_thought_emulator.py \
     --train_path data/${FOLDER}/src1_train.txt \
     --val_path data/${FOLDER}/src1_valid.txt \
     --test_path data/${FOLDER}/src1_test_bigbench.txt \
@@ -138,7 +138,7 @@ export A=1
 export T=1
 export SAVE=train_models/4_by_4_mult/gpt2/
 mkdir -p $SAVE
-TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python train_coupled_emulator_and_student.py \
+TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python src/train_coupled_emulator_and_student.py \
     --train_path ${FOLDER}/train.txt \
     --val_path ${FOLDER}/valid.txt \
     --test_path ${FOLDER}/test_bigbench.txt \
