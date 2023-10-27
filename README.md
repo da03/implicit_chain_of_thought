@@ -9,7 +9,7 @@ Here we provide code to reproduce our results.
 
 ## Datasets & Pretrained Models & Logs
 
-All dataset files and log files during inference are included in this repo, with the exception of large training files maintained using Git LFS. Model checkpoints are stored on Google Drive. The folder containing all checkpoints can be found at [this link](https://drive.google.com/drive/folders/1Sclr5bmLZIUcktCaFAeWRTevRGLUwlC_?usp=drive_link).
+All dataset files and log files during inference are included in this repo, with the exception of large training files maintained under Git LFS. Model checkpoints are stored on Google Drive. The folder containing all checkpoints can be found at [this link](https://drive.google.com/drive/folders/1Sclr5bmLZIUcktCaFAeWRTevRGLUwlC_?usp=drive_link).
 
 * 4 X 4 Mult - GPT-2: [data](data/4_by_4_mult/) [model](https://drive.google.com/drive/folders/1Zp-PFwiHkwq0wuFScjN5R8jDdXdnQYQ_?usp=sharing) [log](logs/4_by_4_mult/gpt2/log.generate)
 * 4 X 4 Mult - GPT-2 Medium: [data](data/4_by_4_mult/) [model](https://drive.google.com/drive/folders/1B0e67ifTSTTuUg0Sh-of5135Rh4KQ-2v?usp=sharing) [log](logs/4_by_4_mult/gpt2-medium/log.generate)
@@ -74,10 +74,46 @@ TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python train_
     --save_model /n/holyscratch01/rush_lab/Users/yuntian/implicit/$SAVE \
     --interval $INTERVAL \
     --max_new_tokens 20 \
-    > ${SAVE}/log.train.text.model${MODELSAVE}.folder${FOLDER}.e${EPOCHS}.lr${LR}.${BSZ} 2>&1&
+    > ${SAVE}/log.train 2>&1&
 ```
 
 #### 2. Thought Emulation
+
+```
+export FOLDER=data/4_by_4_mult
+export INTERVAL=0
+export MODEL=gpt2
+export LR=5e-5
+export M=1
+export FEED=p
+export USE=argmin
+export EPOCHS=40
+export BSZ=32
+export F=diagonal
+export MODELSAVE="${MODEL////_}"
+export QMODEL=train_models/4_by_4_mult/gpt2/teacher/checkpoint_1_5e-05_gpt2
+export SAVE=train_models/4_by_4_mult/gpt2/emulator_initial
+mkdir -p $SAVE
+CUDA_VISIBLE_DEVICES=3 TOKENIZERS_PARALLELISM=false stdbuf -oL -eL python train_thought_emulator.py \
+    --train_path data/${FOLDER}/src1_train.txt \
+    --val_path data/${FOLDER}/src1_valid.txt \
+    --test_path data/${FOLDER}/src1_test_bigbench.txt \
+    --epochs $EPOCHS \
+    --lr $LR \
+    --model $MODEL \
+    --batch_size $BSZ \
+    --qmodel $QMODEL \
+    --follow $F \
+    --feed $FEED \
+    --use $USE \
+    --no_save 0 \
+    --save_model $SAVE \
+    --interval $INTERVAL \
+    --mixture_size $M \
+    --use_rnn 1 \
+    --use_attn 1 \
+    --no_mixture 1 \
+    > ${SAVE}/log.train.text.model${MODELSAVE}.folder${FOLDER}.e${EPOCHS}.lr${LR}.${BSZ} 2>&1&
 
 #### 3. Couple and Optimize
 
