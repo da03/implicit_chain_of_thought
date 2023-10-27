@@ -1,5 +1,7 @@
 # Implicit Chain of Thought Reasoning via Knowledge Distillation
 
+![](imgs/training_illustration.png)
+
 Here we provide code to reproduce our results.
 
 ## Prerequisites
