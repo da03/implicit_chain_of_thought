@@ -71,7 +71,7 @@ TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python train_
     --batch_size $BSZ \
     --qmodel $QMODEL \
     --follow $F \
-    --save_model /n/holyscratch01/rush_lab/Users/yuntian/implicit/$SAVE \
+    --save_model $SAVE \
     --interval $INTERVAL \
     --max_new_tokens 20 \
     > ${SAVE}/log.train 2>&1&
@@ -126,8 +126,8 @@ export E=6
 export EPOCHS=40
 export LR=5e-5
 export F=diagonal
-export MODEL=/n/holyscratch01/rush_lab/Users/yuntian/implicit/long_mult_4_prelayernorm/phase0/interval0/gpt2/r0_mbottom_e40_fdiagonal_minus0/checkpoint_3_5e-05
-export QMODEL=/n/holyscratch01/rush_lab/Users/yuntian/implicit/long_mult_4_prelayernorm/use_attn_1rnn_predicttoken_prelayernorm/phase1/nomixture/nolegacy/interval0/pw0/gptsmall/m1/feedp_useargmin_lr5e-5_w0_pw0_minus0_fdiagonal/checkpoint_${E}_5e-05
+export MODEL=train_models/4_by_4_mult/gpt2/student_initial/checkpoint_3_5e-05
+export QMODEL=train_models/4_by_4_mult/gpt2/emulator_initial/checkpoint_${E}_5e-05
 export BSZ=32
 export A=1
 export T=1
