@@ -28,6 +28,7 @@ def save_model(model, tokenizer, model_dir):
 
 @torch.no_grad()
 def evaluate(dataloader, tokenizer, ctx, teacher, max_new_tokens):
+    teacher.eval()
     total_instances = 0
     total_tokens = 0
     total_correct = 0
@@ -53,6 +54,7 @@ def evaluate(dataloader, tokenizer, ctx, teacher, max_new_tokens):
             max_new_tokens=max_new_tokens,
         )
         # Evaluate
+        #import pdb; pdb.set_trace()
         for i, (input_ids_all_i, beam_output_i) in enumerate(zip(input_ids_all, beam_output)):
             sep_position = sep_positions[i].item()
             tgt = input_ids_all_i[sep_position+1:]
@@ -119,6 +121,7 @@ def main():
     # Train
     for epoch in range(args.epochs):
         print(f"Epoch {epoch}")
+        teacher.train()
         for batch in tqdm.tqdm(train_dataloader):
             input_ids = batch['input_ids_all'].to(device)
             labels = batch['labels_all'].to(device)
@@ -138,7 +141,6 @@ def main():
         accuracy, token_accuracy, ppl = evaluate(val_dataloader, tokenizer, ctx, teacher, args.max_new_tokens)
         print (f'Val. PPL: {ppl}; Accuracy: {accuracy}; Token Accuracy: {token_accuracy}.')
         teacher.save_pretrained(os.path.join(args.save_model, f'checkpoint_{epoch}'))
-        model.train()
 
 if __name__ == "__main__":
     main()

@@ -4,12 +4,12 @@ import torch
 import torch.nn as nn
 from torch.nn import CrossEntropyLoss
 
-from transformers import AutoModelForCausalLM, AutoTokenizer, StoppingCriteriaList, GenerationConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer, StoppingCriteriaList, GenerationConfig, LogitsProcessorList
 
 from .configuration_teacher import TeacherConfig
 import sys
 sys.path.append("..")
-from utils import get_sep_position, TwoEOSStoppingCriteria
+from utils import get_sep_position, DoubleEOSStoppingCriteria, DoubleEOSLogitsProcessor
 from .modeling_gpt2_implicit import GPT2LMHeadImplicitModel
 
 
@@ -51,13 +51,18 @@ class Teacher(nn.Module):
         sep_positions = get_sep_position(input_ids, self.tokenizer.eos_token_id)
         batch_size = input_ids.shape[0]
 
-        # Since there's one eos after CoT and another after final answer, we need to wait generating two eos
+        # Since there's one eos after CoT and another after final answer, we need to wait for two eos
         generation_config = GenerationConfig.from_model_config(self.base_model.config)
         if stop_on_two_eos:
             generation_config.eos_token_id = -1
+            logits_processor = LogitsProcessorList([DoubleEOSLogitsProcessor(self.tokenizer.eos_token_id)])
+            stopping_criteria = StoppingCriteriaList([DoubleEOSStoppingCriteria(self.tokenizer.eos_token_id)])
+        else:
+            logits_processor = None
+            stopping_criteria = None
 
         if sep_positions.eq(sep_positions[0]).all():
-            input_ids = input_ids[:sep_positions[0]+1]
+            input_ids = input_ids[:, :sep_positions[0]+1]
             beam_output = self.base_model.generate(
                 input_ids=input_ids,
                 generation_config=generation_config,
@@ -65,9 +70,8 @@ class Teacher(nn.Module):
                 num_beams=num_beams,
                 early_stopping=True,
                 num_return_sequences=1,
-                eos_token_id=(-1 if stop_on_two_eos else self.tokenizer.eos_token_id),
-                pad_token_id=(-1 if stop_on_two_eos else self.tokenizer.eos_token_id),
-                stopping_criteria=(StoppingCriteriaList([TwoEOSStoppingCriteria(self.tokenizer.eos_token_id)]) if stop_on_two_eos else None),
+                logits_processor=logits_processor,
+                stopping_criteria=stopping_criteria,
             )
             beam_output = beam_output.unsqueeze(1)
         else:
@@ -75,7 +79,7 @@ class Teacher(nn.Module):
             for i in range(batch_size):
                 input_ids_i = input_ids[i:i+1]
                 sep_positions_i = sep_positions[i:i+1]
-                input_ids_i = input_ids_i[:sep_positions_i+1]
+                input_ids_i = input_ids_i[:, :sep_positions_i+1]
                 beam_output_i = self.base_model.generate(
                     input_ids=input_ids_i,
                     generation_config=generation_config,
@@ -83,9 +87,8 @@ class Teacher(nn.Module):
                     num_beams=num_beams,
                     early_stopping=True,
                     num_return_sequences=1,
-                    eos_token_id=(-1 if stop_on_two_eos else self.tokenizer.eos_token_id),
-                    pad_token_id=(-1 if stop_on_two_eos else self.tokenizer.eos_token_id),
-                    stopping_criteria=(StoppingCriteriaList([TwoEOSStoppingCriteria(self.tokenizer.eos_token_id)]) if stop_on_two_eos else None),
+                    logits_processor=logits_processor,
+                    stopping_criteria=stopping_criteria,
                 )
                 beam_output.append(beam_output_i)
         return beam_output
@@ -99,6 +102,7 @@ class Teacher(nn.Module):
         return model
 
     def save_pretrained(self, save_directory):
+        print (f'Saving to {save_directory}')
         self.config.save_pretrained(save_directory)
         state_dict = self.state_dict()
         torch.save(state_dict, os.path.join(save_directory, 'state_dict.bin'))

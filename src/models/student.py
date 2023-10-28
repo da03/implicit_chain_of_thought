@@ -42,7 +42,7 @@ class Student(nn.Module):
         for i in range(batch_size):
             input_ids_i = input_ids[i:i+1]
             sep_positions_i = sep_positions[i:i+1]
-            input_ids_i = input_ids_i[:sep_positions_i+1]
+            input_ids_i = input_ids_i[:, :sep_positions_i+1]
             beam_output_i = self.base_model.generate(
                 input_ids=input_ids_i,
                 max_new_tokens=max_new_tokens,
