@@ -39,7 +39,7 @@ As an example, let's take a look at the first line from the 4 X 4 Mult test set 
 9 1 7 3 * 9 4 3 3||1 7 4 3 3 + 0 6 7 8 4 1 ( 1 3 2 2 8 1 ) + 0 0 7 5 1 1 1 ( 1 3 9 7 9 2 1 ) + 0 0 0 7 5 1 1 1 #### 1 3 9 4 5 4 2 1
 ```
 
-In this line, the input is `9 1 7 3 * 9 4 3 3` (corresponding to `3719*3349`), the chain-of-thought is `1 7 4 3 3 + 0 6 7 8 4 1 ( 1 3 2 2 8 1 ) + 0 0 7 5 1 1 1 ( 1 3 9 7 9 2 1 ) + 0 0 0 7 5 1 1 1`, and the output is `1 3 9 4 5 4 2 1` (corresponding to `12454931`).
+In this example, the input is `9 1 7 3 * 9 4 3 3` (corresponding to `3719*3349`), the chain-of-thought is `1 7 4 3 3 + 0 6 7 8 4 1 ( 1 3 2 2 8 1 ) + 0 0 7 5 1 1 1 ( 1 3 9 7 9 2 1 ) + 0 0 0 7 5 1 1 1`, and the output is `1 3 9 4 5 4 2 1` (corresponding to `12454931`).
 
 Note that for Teacher Training, (a) Mind-Reading the Teacher, and (b) Thought Emulation, the chain-of-thought steps are used; but for (c) Couple and Optimize the chain-of-thought steps are not used.
 
@@ -59,12 +59,11 @@ export SAVE=train_models/4_by_4_mult/gpt2/teacher
 echo $SAVE
 mkdir -p $SAVE
 TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python src/train_teacher.py \
-    --train_path data/${FOLDER}/train.txt \
-    --val_path data/${FOLDER}/valid.txt \
-    --test_path data/${FOLDER}/test_bigbench.txt \
+    --train_path ${FOLDER}/train.txt \
+    --val_path ${FOLDER}/valid.txt \
     --epochs $EPOCHS \
     --lr $LR \
-    --model $MODEL \
+    --base_model $MODEL \
     --batch_size $BSZ \
     --save_model $SAVE \
     > ${SAVE}/log.train 2>&1&
@@ -86,9 +85,9 @@ export QMODEL=train_models/4_by_4_mult/gpt2/teacher/checkpoint_1_5e-05_gpt2
 export SAVE=train_models/4_by_4_mult/gpt2/student_initial
 mkdir -p $SAVE
 TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python src/train_mind_reading_student.py \
-    --train_path data/${FOLDER}/src1_train.txt \
-    --val_path data/${FOLDER}/src1_valid.txt \
-    --test_path data/${FOLDER}/src1_test_bigbench.txt \
+    --train_path ${FOLDER}/src1_train.txt \
+    --val_path ${FOLDER}/src1_valid.txt \
+    --test_path ${FOLDER}/src1_test_bigbench.txt \
     --epochs $EPOCHS \
     --lr $LR \
     --model $MODEL \
@@ -120,9 +119,9 @@ export QMODEL=train_models/4_by_4_mult/gpt2/teacher/checkpoint_1_5e-05_gpt2
 export SAVE=train_models/4_by_4_mult/gpt2/emulator_initial
 mkdir -p $SAVE
 CUDA_VISIBLE_DEVICES=3 TOKENIZERS_PARALLELISM=false stdbuf -oL -eL python src/train_thought_emulator.py \
-    --train_path data/${FOLDER}/src1_train.txt \
-    --val_path data/${FOLDER}/src1_valid.txt \
-    --test_path data/${FOLDER}/src1_test_bigbench.txt \
+    --train_path ${FOLDER}/src1_train.txt \
+    --val_path ${FOLDER}/src1_valid.txt \
+    --test_path ${FOLDER}/src1_test_bigbench.txt \
     --epochs $EPOCHS \
     --lr $LR \
     --model $MODEL \

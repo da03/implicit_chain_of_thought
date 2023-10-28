@@ -42,14 +42,7 @@ class Student(nn.Module):
         for i in range(batch_size):
             input_ids_i = input_ids[i:i+1]
             sep_positions_i = sep_positions[i:i+1]
-            #import pdb; pdb.set_trace()
-            #outputs = self.forward(input_ids_i, sep_positions_i, [z[i:i+1] for z in teacher_states], output_hidden_states=True)
-            #tgt = input_ids_single[sep_position+1:]
-            #max_new_tokens = 512
-            #max_new_tokens = tgt.size(0)+10
-            #max_new_tokens = tgt[tgt.ne(tokenizer.eos_token_id)].size(0)+10
-            #beam_size = 5
-            #beam_size = 1
+            input_ids_i = input_ids_i[:sep_positions_i+1]
             beam_output_i = self.base_model.generate(
                 input_ids=input_ids_i,
                 max_new_tokens=max_new_tokens,

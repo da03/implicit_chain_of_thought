@@ -1,249 +1,143 @@
 import math
 import torch
-from torch.utils.data import Dataset, DataLoader
-from torch.nn import CrossEntropyLoss
+from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM, AutoTokenizer, AdamW
 import argparse
 import os
 import sys
 import tqdm
-from data import CoTDataset, DataCollator
+from models.teacher import Teacher
+from models.configuration_teacher import TeacherConfig
+from data import CoTDataset, CoTDataCollator, extract_answer
 import logging
+
+from utils import get_sep_position
+
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
-logging.disable(logging.INFO) # disable INFO and DEBUG logging everywhere
-# or 
 logging.disable(logging.WARNING) # disable WARNING, INFO and DEBUG logging everywhere
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
-def extract_answer(text):
-    split_pattern = '####'
-    if split_pattern not in text:
-        return None
-    else:
-        _, ans = text.strip().split('####', 1)
-        ans = ans.strip().replace(',', '')
-        return ans
+def save_model(model, tokenizer, model_dir):
+    print ('saving', model_dir)
+    os.makedirs(model_dir, exist_ok=True)
+    model.save_pretrained(model_dir)
+    tokenizer.save_pretrained(model_dir)
 
-def evaluate(model, dataloader, tokenizer, ctx, beam_size=5, use_max=False):
-    with torch.no_grad():
-        total = 0
-        word_correct = 0
-        total_correct = 0
-        total_loss = 0
-        total_instances = 0
-        for batch in tqdm.tqdm(dataloader):
-            input_ids = batch['input_ids'].to(device)
-            labels = batch['labels'].to(device)
-            with ctx:
-                outputs = model(input_ids=input_ids, labels=labels)
-            logits = outputs.logits
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
-            loss_fct = CrossEntropyLoss()
-            loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-            total_loss += loss.item() * labels[...,1:].ge(0).sum().item()
+@torch.no_grad()
+def evaluate(dataloader, tokenizer, ctx, teacher, max_new_tokens):
+    total_instances = 0
+    total_tokens = 0
+    total_correct = 0
+    total_correct_tokens = 0
+    total_loss = 0
+    for batch in tqdm.tqdm(dataloader):
+        input_ids_all = batch['input_ids_all'].to(device)
+        labels = batch['labels_all'].to(device)
+        # Remove answer part
+        sep_positions = get_sep_position(input_ids_all, tokenizer.eos_token_id)
+        input_ids = input_ids_all[:, :sep_positions.max().item()+1]
+        batch_size = input_ids.shape[0]
+        with ctx:
+            outputs = teacher.compute_loss(input_ids=input_ids_all, labels=labels)
+        total_loss += outputs.total_loss.item()
+        total_correct_tokens += outputs.total_correct.item()
+        total_tokens += outputs.total_tokens
+        total_instances += batch_size
 
-            labels_pred = logits.argmax(-1)
-            correct = ((labels_pred[...,:-1] == labels[..., 1:]) * labels[..., 1:].ge(0)).sum().item()
-            word_correct += correct
-            total += labels[..., 1:].ge(0).sum().item()
-            # TODO: generate and evaluate accuracy
-            # activate beam search and early_stopping
-            #import pdb; pdb.set_trace()
-
-            #sep_ids = []
-            for i, input_ids_single in enumerate(input_ids):
-                total_instances += 1
-            #TODO     sep_id = input_ids_single.tolist().index(tokenizer.eos_token_id)
-            #TODO     #sep_ids.append(sep_id)
-            #TODO #assert all([item == sep_id for item in sep_ids])
-            #TODO     tgt = input_ids_single[sep_id+1:]
-            #TODO     max_new_tokens = tgt.size(0)+10
-            #TODO     max_new_tokens = tgt[tgt.ne(tokenizer.eos_token_id)].size(0)+10
-            #TODO     if not use_max:
-            #TODO         max_new_tokens = 300
-            #TODO     beam_output = model.generate(
-            #TODO         input_ids=input_ids_single[:sep_id+1].unsqueeze(0),
-            #TODO         max_new_tokens=max_new_tokens,
-            #TODO         num_beams=beam_size,
-            #TODO         early_stopping=True,
-            #TODO         num_return_sequences=1,
-            #TODO     )
-            #TODO     ##src = input_ids_single[:sep_idx+1]
-            #TODO     ##tgt = input_ids_single[sep_idx+1:]
-
-            #TODO     ##sep_idx = tgt.tolist().index(tokenizer.eos_token_id)
-            #TODO     ##tgt = tgt[:sep_idx]
-            #TODO     ##tgt_text = tokenizer.decode(tgt)
-            #TODO     ###ans = extract_answer(tgt_text)
-            #TODO     ##ans = tgt_text.strip()
-
-
-            #TODO     ##beam_output = model.generate(
-            #TODO     ##    input_ids=src.view(1, -1),
-            #TODO     ##    max_new_tokens=100,
-            #TODO     ##    num_beams=5,
-            #TODO     ##    early_stopping=True,
-            #TODO     ##    num_return_sequences=1,
-            #TODO     ##)
-            #TODO     ##
-            #TODO #import pdb; pdb.set_trace()
-            #TODO #i = 0
-            #TODO #for input_ids_single, beam_output_i in zip(input_ids, beam_output):
-            #TODO     #tgt = tgt[:sep_id]
-            #TODO     tgt_text = tokenizer.decode(tgt, skip_special_tokens=True)
-            #TODO     ans = extract_answer(tgt_text)
-            #TODO     pred_text = tokenizer.decode(beam_output[0][sep_id+1:], skip_special_tokens=True)
-            #TODO     if i == 0:
-            #TODO         #print ("Output:\n" + 100 * '-')
-            #TODO         #print (pred_text)
-            #TODO         print ("\n" + 100 * '-')
-            #TODO         print ('GT:', tokenizer.decode(input_ids_single, skip_special_tokens=True))
-            #TODO         print ('Predicted:', pred_text)
-            #TODO     pred_ans = extract_answer(pred_text) #.split()[-1] #extract_answer(pred_text)
-            #TODO     #import pdb; pdb.set_trace()
-            #TODO     if ans == pred_ans:
-            #TODO         total_correct += 1
-            #TODO     i += 1
-            #TODO #break
-
-        word_accuracy = word_correct / total
-        accuracy = total_correct / total_instances
-        loss = total_loss / total
-        ppl = math.exp(loss)
-    return accuracy, word_accuracy, ppl
+        # Generate
+        beam_output = teacher.generate(
+            input_ids=input_ids,
+            max_new_tokens=max_new_tokens,
+        )
+        # Evaluate
+        for i, (input_ids_all_i, beam_output_i) in enumerate(zip(input_ids_all, beam_output)):
+            sep_position = sep_positions[i].item()
+            tgt = input_ids_all_i[sep_position+1:]
+            tgt_text = tokenizer.decode(tgt, skip_special_tokens=True)
+            ans = extract_answer(tgt_text)
+            pred_text = tokenizer.decode(beam_output_i[0][sep_position+1:], skip_special_tokens=True)
+            pred_ans = extract_answer(pred_text)
+            if ans == pred_ans:
+                total_correct += 1
+            if i == 0:
+                print (f'Input: {tokenizer.decode(input_ids_all_i[:sep_position], skip_special_tokens=True)}')
+                print (f'Target: {tgt_text}')
+                print (f'Predicted: {pred_text}')
+                print ('')
+    accuracy = total_correct / total_instances
+    token_accuracy = total_correct_tokens / total_tokens
+    loss = total_loss / total_instances
+    ppl = math.exp(loss)
+    return accuracy, token_accuracy, ppl
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train_path', type=str, default='data/math_scaffolding/src1_train.txt')
-    parser.add_argument('--val_path', type=str, default='data/math_scaffolding/src1_valid.txt')
-    parser.add_argument('--test_path', type=str, default='data/math_scaffolding/src1_test.txt')
-    parser.add_argument('--eval_path', type=str, default=None)
-    parser.add_argument('--epochs', type=int, default=5)
-    parser.add_argument('--compile', type=int, default=1)
+    parser.add_argument('--train_path', type=str, required=True)
+    parser.add_argument('--val_path', type=str, required=True)
+    parser.add_argument('--save_model', type=str, required=True)
+    parser.add_argument('--max_new_tokens', type=int, default=128)
+    parser.add_argument('--base_model', type=str, default='gpt2')
+    parser.add_argument('--epochs', type=int, default=1)
     parser.add_argument('--batch_size', type=int, default=5)
     parser.add_argument('--lr', type=float, default=5e-5)
     parser.add_argument('--max_grad_norm', type=float, default=1.0)
-    parser.add_argument('--model', type=str, default='gpt2')
-    parser.add_argument('--save_model', type=str, default='model_nocot')
     args = parser.parse_args()
 
     print (args)
 
-    
-    tokenizer = AutoTokenizer.from_pretrained(args.model)
-    dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
-    if 'gpt2-xl' not in args.model:
-        dtype = 'float32'
-        beam_size = 5
-    else:
-        dtype = 'float32'
-        beam_size = 1
-    beam_size = 1
-    #if 'fullcot' in args.train_path:
-    #    dtype = 'bfloat16'
+    dtype = 'float32'
     ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
-    print (ptdtype, dtype, beam_size)
-    model = AutoModelForCausalLM.from_pretrained(args.model).to(device).to(ptdtype)
-    if args.compile == 1:
-        model = torch.compile(model)
-    else:
-        print ('WARNING: no compile!')
-    # TODO: maybe use pretrained model here?
-    #model.apply(model._init_weights)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    ctx = torch.amp.autocast(device_type='cuda', dtype=ptdtype)
+    print (ptdtype, dtype, device)
+
+    # Create Model
+    config = TeacherConfig(base_model=args.base_model)
+    teacher = Teacher(config).to(device).to(ptdtype)
+
+    # Load data
+    tokenizer = teacher.tokenizer
+    collate_fn = CoTDataCollator(tokenizer)
+    train_dataset = CoTDataset(tokenizer, args.train_path, 1024)
+    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True)
+    val_dataset = CoTDataset(tokenizer, args.val_path, 1024)
+    val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=False)
+
+    # Create Optimizer
+    trainable_params = teacher.parameters()
     use_fused = True 
     extra_args = dict(fused=True) if use_fused else dict()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, **extra_args)
-    #optimizer = AdamW(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.AdamW(trainable_params, lr=args.lr, **extra_args)
 
-    collate_fn = DataCollator(tokenizer)
-    trun = 1024
-    if 'fullcot' in args.train_path:
-        trun = 220
-        if 'medium' in args.model:
-            trun = 256
-        if 'gpt' == args.model:
-            trun = 256
-    print (trun)
-    train_dataset = CoTDataset(tokenizer, args.train_path, trun)
-    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=True)
-    val_dataset = CoTDataset(tokenizer, args.val_path, trun)
-    val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=False)
-    test_dataset = CoTDataset(tokenizer, args.test_path, trun)
-    test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=False)
-    if args.eval_path is not None:
-        eval_dataset = CoTDataset(tokenizer, args.eval_path, trun)
-        eval_dataloader = DataLoader(eval_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=False)
-    else:
-        eval_dataloader = None
-
-    torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
-    torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
-    ctx = torch.amp.autocast(device_type='cuda', dtype=ptdtype)
-    #accuracy, word_accuracy, ppl = evaluate(model, val_dataloader, tokenizer, ctx, beam_size, use_max=True)
-    #print (f'Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
-    accuracy, word_accuracy, ppl = evaluate(model, test_dataloader, tokenizer, ctx, beam_size, use_max=True)
-    print (f'Test PPL: {ppl}. Test Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
-    if eval_dataloader is not None:
-        accuracy, word_accuracy, ppl = evaluate(model, eval_dataloader, tokenizer, ctx, beam_size, use_max=True)
-        print (f'Eval  PPL: {ppl}. Eval Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
-    model.train()
+    teacher.train()
     step = 0
-    def save_model(model, tokenizer, model_dir):
-        print ('saving', model_dir)
-        os.makedirs(model_dir, exist_ok=True)
-        model.save_pretrained(model_dir)
-        tokenizer.save_pretrained(model_dir)
 
-    #import pdb; pdb.set_trace()
+    # Train
     for epoch in range(args.epochs):
-        save_model(model, tokenizer, f'{args.save_model}/checkpoint_{epoch}_{args.lr}_{args.model}')
-        print(f"Epoch {epoch}") #TODO change epoch
-
-        #model.save_pretrained("finetuned_gpt2")
+        print(f"Epoch {epoch}")
         for batch in tqdm.tqdm(train_dataloader):
-            #if epoch == 1:
-            #    import pdb; pdb.set_trace()
-            input_ids = batch['input_ids'].to(device)
-            print ('shape', input_ids.shape)
-            labels = batch['labels'].to(device)
-            #import pdb; pdb.set_trace()
+            input_ids = batch['input_ids_all'].to(device)
+            labels = batch['labels_all'].to(device)
             with ctx:
-                outputs = model(input_ids=input_ids)
-            #loss = outputs.loss
-            logits = outputs.logits
-
-            labels_pred = logits.argmax(-1)
-            correct = ((labels_pred[...,:-1] == labels[...,1:]) * labels[...,1:].ge(0)).sum().item()
-            total = labels[...,1:].ge(0).sum()
-            accuracy = correct / total
-
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
-            loss_fct = CrossEntropyLoss()
-            loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+                outputs = teacher.compute_loss(input_ids=input_ids, labels=labels)
+            loss = outputs.loss
+            token_accuracy = outputs.token_accuracy.item()
 
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+            torch.nn.utils.clip_grad_norm_(trainable_params, args.max_grad_norm)
             optimizer.step()
             optimizer.zero_grad()
-            loss = loss.item()
-            ppl = math.exp(loss)
+            ppl = loss.exp().item()
             if step % 100 == 0:
-                print (f"Step: {step}. PPL: {ppl}. Accuracy: {accuracy}")
-                sys.stdout.flush()
+                print (f"Step: {step}. PPL: {ppl}. Token Accuracy: {token_accuracy}")
             step += 1
-        #accuracy, word_accuracy, ppl = evaluate(model, val_dataloader, tokenizer, ctx, beam_size)
-        #print (f'Epoch {epoch}. Validation PPL: {ppl}. Validation Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
-        accuracy, word_accuracy, ppl = evaluate(model, test_dataloader, tokenizer, ctx, beam_size)
-        print (f'Test PPL: {ppl}. Test Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
-        if eval_dataloader is not None:
-            accuracy, word_accuracy, ppl = evaluate(model, eval_dataloader, tokenizer, ctx, beam_size)
-            print (f'Eval PPL: {ppl}. Eval Accuracy: {accuracy}. Word Accuracy: {word_accuracy}.')
+        accuracy, token_accuracy, ppl = evaluate(val_dataloader, tokenizer, ctx, teacher, args.max_new_tokens)
+        print (f'Val. PPL: {ppl}; Accuracy: {accuracy}; Token Accuracy: {token_accuracy}.')
+        teacher.save_pretrained(os.path.join(args.save_model, f'checkpoint_{epoch}'))
         model.train()
 
 if __name__ == "__main__":

@@ -30,7 +30,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 @torch.no_grad()
-def evaluate(dataloader, tokenizer, ctx, emulator, student):
+def evaluate(dataloader, tokenizer, ctx, emulator, student, max_new_tokens):
     total_time = 0
     total_instances = 0
     total_correct = 0
@@ -39,24 +39,16 @@ def evaluate(dataloader, tokenizer, ctx, emulator, student):
         input_ids_all = batch['input_ids_nocot'].to(device)
         # Remove answer part
         sep_positions = get_sep_position(input_ids_all, tokenizer.eos_token_id)
-        input_ids = input_ids_all[:, :sep_positions.max().item()+1]
+        input_ids = input_ids_all[:, :sep_positions.max()+1]
         start_time = time.time()
         with ctx:
-            #import pdb; pdb.set_trace()
             emulated_teacher_states = emulator(input_ids)
-            #outputs_cot = model_q.forward_zs_feedp_pred_predicttoken(input_ids=input_ids_cot, zs=None, first_ids=first_ids, rnn=rnn, mlps=mlps, relevant_tokens=relevant_tokens, mixture_components=mixture_components, phase2=True, mult_p=mult_p, softmax_p=softmax_p, softmax_p_temp=softmax_p_temp, key_proj=key_proj, query_proj=query_proj, out_proj=out_proj, no_mixture=no_mixture)
-        #    hidden_state_relevant_list = outputs_cot.zs_p
-        #    zs = []
-        #    for i, z in enumerate(hidden_state_relevant_list):
-        #        zs.append(mlps_patch[i](z))
-        #    hidden_state_relevant_list = zs
-        #kl = 0.
 
         # Generate from student
         beam_output = student.generate(
             input_ids=input_ids,
             teacher_states=emulated_teacher_states,
-            max_new_tokens=128,
+            max_new_tokens,
         )
 
         # Evaluate
@@ -86,6 +78,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--test_path', type=str, required=True)
     parser.add_argument('--batch_size', type=int, default=1)
+    parser.add_argument('--max_new_tokens', type=int, default=128)
     parser.add_argument('--student_path', type=str, required=True)
     parser.add_argument('--emulator_path', type=str, required=True)
     args = parser.parse_args()
@@ -111,7 +104,7 @@ def main():
     test_dataset = CoTDataset(tokenizer, args.test_path, 1024)
     test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=False)
 
-    accuracy, throughput  = evaluate(test_dataloader, tokenizer, ctx, emulator, student)
+    accuracy, throughput  = evaluate(test_dataloader, tokenizer, ctx, emulator, student, args.max_new_tokens)
     print (f"Test Accuracy: {accuracy}. Throughput: {throughput}")
 
 
