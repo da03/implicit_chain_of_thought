@@ -75,28 +75,24 @@ TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python src/tr
 
 ```
 export FOLDER=data/4_by_4_mult
-export INTERVAL=0
+export DELTA=dynamic
 export MODEL=gpt2
-export F=diagonal
 export EPOCHS=40
 export LR=5e-5
 export BSZ=32
-export QMODEL=train_models/4_by_4_mult/gpt2/teacher/checkpoint_1_5e-05_gpt2
+export TEACHER=train_models/4_by_4_mult/gpt2/teacher/checkpoint_0
 export SAVE=train_models/4_by_4_mult/gpt2/student_initial
 mkdir -p $SAVE
 TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python src/train_mind_reading_student.py \
-    --train_path ${FOLDER}/src1_train.txt \
-    --val_path ${FOLDER}/src1_valid.txt \
-    --test_path ${FOLDER}/src1_test_bigbench.txt \
+    --train_path ${FOLDER}/train.txt \
+    --val_path ${FOLDER}/valid.txt \
     --epochs $EPOCHS \
     --lr $LR \
-    --model $MODEL \
+    --base_model $MODEL \
     --batch_size $BSZ \
-    --qmodel $QMODEL \
-    --follow $F \
+    --teacher $TEACHER \
     --save_model $SAVE \
-    --interval $INTERVAL \
-    --max_new_tokens 20 \
+    --delta $DELTA \
     > ${SAVE}/log.train 2>&1&
 ```
 
@@ -106,7 +102,7 @@ TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python src/tr
 
 ```
 export FOLDER=data/4_by_4_mult
-export INTERVAL=0
+export DELTA=0
 export MODEL=gpt2
 export LR=5e-5
 export M=1
@@ -132,7 +128,7 @@ CUDA_VISIBLE_DEVICES=3 TOKENIZERS_PARALLELISM=false stdbuf -oL -eL python src/tr
     --use $USE \
     --no_save 0 \
     --save_model $SAVE \
-    --interval $INTERVAL \
+    --interval $DELTA \
     --mixture_size $M \
     --use_rnn 1 \
     --use_attn 1 \
@@ -146,7 +142,7 @@ CUDA_VISIBLE_DEVICES=3 TOKENIZERS_PARALLELISM=false stdbuf -oL -eL python src/tr
 
 ```
 export FOLDER=data/4_by_4_mult
-export INTERVAL=0
+export DELTA=0
 export M=1
 export E=6
 export EPOCHS=40

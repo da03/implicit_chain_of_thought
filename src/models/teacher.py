@@ -19,10 +19,66 @@ class Teacher(nn.Module):
         self.config = config
         self.base_model = GPT2LMHeadImplicitModel.from_pretrained(config.base_model)
         self.tokenizer = AutoTokenizer.from_pretrained(config.tokenizer_name)
+        num_layers = len(self.base_model.transformer.h)
+        hidden_size = self.base_model.config.hidden_size
+        self.num_layers = num_layers
+        self.hidden_size = hidden_size
 
     def forward(self, input_ids):
         outputs = self.base_model.forward(input_ids=input_ids)
         return outputs
+
+    def compute_positions_to_extract_per_layer(self, subset, delta, first_sep_positions, second_sep_positions):
+        batch_size = first_sep_positions.shape[0]
+        positions_to_extract_per_layer = first_sep_positions.new_zeros(batch_size, self.num_layers).long()
+        layer_ids = torch.arange(start=0, end=self.num_layers).to(first_sep_positions.device)
+        for batch_id in range(batch_size):
+            first_position_to_extract = first_sep_positions[batch_id]
+            last_position_to_extract = second_sep_positions[batch_id]
+            if subset == 'diagonal':
+                if delta == 'dynamic': # determine actual delta
+                    delta = (last_position_to_extract - first_position_to_extract) / (self.num_layers - 1)
+            elif subset == 'first_column' or subset == 'last_column':
+                delta = 0
+            else:
+                assert subset == 'last_column', subset
+                delta = 0
+                first_position_to_extract = last_position_to_extract
+            positions_to_extract = torch.round(first_position_to_extract + layer_ids * delta)
+            positions_to_extract = positions_to_extract.clamp(max=last_position_to_extract)
+            positions_to_extract_per_layer[batch_id] = positions_to_extract
+        return positions_to_extract_per_layer
+
+    def extract_states(self, input_ids, delta, subset='diagonal'):
+        if delta.isnumeric():
+            delta = int(delta)
+        batch_size = input_ids.shape[0]
+        hidden_size = self.hidden_size
+        # Forward the teacher to produce all hidden states
+        outputs = self.base_model.forward(input_ids=input_ids, output_hidden_states=True)
+        hidden_states = outputs.hidden_states[:-1]
+
+        # Find the boundaries between input and CoT, and CoT and output
+        # [input] first_sep_position [CoT] second_position [output] eos
+        first_sep_positions = get_sep_position(input_ids, self.tokenizer.eos_token_id, skip=0)
+        second_sep_positions = get_sep_position(input_ids, self.tokenizer.eos_token_id, skip=1)
+        input_ids = input_ids[:, :second_sep_positions.max()+1]
+
+        # Compute the positions to extract teacher states (t_l in the paper)
+        positions_to_extract_per_layer = self.compute_positions_to_extract_per_layer(subset, delta, first_sep_positions, second_sep_positions)
+
+        # Extract teacher states
+        teacher_states_extracted = []
+        for i, hidden_state in enumerate(hidden_states):
+            if subset == 'diagonal' or subset == 'first_column' or subset == 'last_column':
+                z = hidden_state.gather(1, positions_to_extract_per_layer[:,i].view(-1, 1, 1).expand(-1, -1, hidden_size)).squeeze(1)
+            elif subset == 'top_row':
+                z = hidden_states[-1].gather(1, positions_to_extract_per_layer[:,i].view(-1, 1, 1).expand(-1, -1, hidden_size)).squeeze(1)
+            else:
+                assert subset == 'bottom_row', subset
+                z = hidden_states[0].gather(1, positions_to_extract_per_layer[:,i].view(-1, 1, 1).expand(-1, -1, hidden_size)).squeeze(1)
+            teacher_states_extracted.append(z)
+        return teacher_states_extracted
 
     def compute_loss(self, input_ids, labels):
         #import pdb; pdb.set_trace()

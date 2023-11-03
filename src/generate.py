@@ -44,12 +44,12 @@ def evaluate(dataloader, tokenizer, ctx, emulator, student, max_new_tokens):
         with ctx:
             emulated_teacher_states = emulator(input_ids)
 
-        # Generate from student
-        beam_output = student.generate(
-            input_ids=input_ids,
-            teacher_states=emulated_teacher_states,
-            max_new_tokens,
-        )
+            # Generate from student
+            beam_output = student.generate(
+                input_ids=input_ids,
+                teacher_states=emulated_teacher_states,
+                max_new_tokens=max_new_tokens,
+            )
 
         # Evaluate
         #import pdb; pdb.set_trace()

@@ -71,7 +71,7 @@ def evaluate(dataloader, tokenizer, ctx, teacher, max_new_tokens):
                 print ('')
     accuracy = total_correct / total_instances
     token_accuracy = total_correct_tokens / total_tokens
-    loss = total_loss / total_instances
+    loss = total_loss / total_tokens
     ppl = math.exp(loss)
     return accuracy, token_accuracy, ppl
 
@@ -84,7 +84,7 @@ def main():
     parser.add_argument('--max_new_tokens', type=int, default=128)
     parser.add_argument('--base_model', type=str, default='gpt2')
     parser.add_argument('--epochs', type=int, default=1)
-    parser.add_argument('--batch_size', type=int, default=5)
+    parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--lr', type=float, default=5e-5)
     parser.add_argument('--max_grad_norm', type=float, default=1.0)
     args = parser.parse_args()
@@ -97,7 +97,7 @@ def main():
     ctx = torch.amp.autocast(device_type='cuda', dtype=ptdtype)
     print (ptdtype, dtype, device)
 
-    # Create Model
+    # Create Student 
     config = TeacherConfig(base_model=args.base_model)
     teacher = Teacher(config).to(device).to(ptdtype)
 
@@ -111,14 +111,14 @@ def main():
 
     # Create Optimizer
     trainable_params = teacher.parameters()
-    use_fused = True 
+    use_fused = 'fused' in inspect.signature(torch.optim.AdamW).parameters
     extra_args = dict(fused=True) if use_fused else dict()
     optimizer = torch.optim.AdamW(trainable_params, lr=args.lr, **extra_args)
 
     teacher.train()
-    step = 0
 
     # Train
+    step = 0
     for epoch in range(args.epochs):
         print(f"Epoch {epoch}")
         teacher.train()

@@ -3,6 +3,7 @@ import os
 
 import torch
 import torch.nn as nn
+from torch.nn import CrossEntropyLoss
 from transformers import AutoTokenizer
 
 sys.path.append("..")
@@ -18,6 +19,8 @@ class Student(nn.Module):
         self.tokenizer = AutoTokenizer.from_pretrained(config.tokenizer_name)
         num_layers = len(self.base_model.transformer.h)
         hidden_size = self.base_model.config.hidden_size
+        self.num_layers = num_layers
+        self.hidden_size = hidden_size
 
         self.mlps = nn.ModuleList([nn.Sequential(
                  nn.Linear(hidden_size, 4*hidden_size),
@@ -31,6 +34,34 @@ class Student(nn.Module):
                 positions_to_substitute=positions_to_substitute, \
                 states_to_substitute=teacher_states, \
                 output_hidden_states=output_hidden_states)
+        return outputs
+
+    def compute_loss(self, input_ids, labels, teacher_states):
+        #import pdb; pdb.set_trace()
+        sep_positions = get_sep_position(input_ids, self.tokenizer.eos_token_id)
+        # First, project teacher states
+        teacher_states = [self.mlps[l](teacher_states[l]) for l in range(len(teacher_states))]
+
+        # Forward while substituting teacher states
+        outputs = self.forward(input_ids, sep_positions, teacher_states)
+        logits = outputs.logits
+
+        labels_pred = logits.argmax(-1)
+        mask = labels[...,1:].ge(0)
+        correct_tokens = ((labels_pred[...,:-1] == labels[...,1:]) * mask).sum()
+        total_tokens = mask.sum()
+        token_accuracy = correct_tokens / total_tokens
+
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+        loss_fct = CrossEntropyLoss()
+        loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+
+        outputs.loss = loss
+        outputs.token_accuracy = token_accuracy
+        outputs.total_correct = correct_tokens
+        outputs.total_loss = loss * total_tokens
+        outputs.total_tokens = total_tokens
         return outputs
 
     def generate(self, input_ids, teacher_states, max_new_tokens=512, num_beams=1):
@@ -65,7 +96,7 @@ class Student(nn.Module):
         return model
 
     def save_pretrained(self, save_directory):
-        config.save_pretrained(save_directory)
+        self.config.save_pretrained(save_directory)
         state_dict = self.state_dict()
         torch.save(state_dict, os.path.join(save_directory, 'state_dict.bin'))
 
