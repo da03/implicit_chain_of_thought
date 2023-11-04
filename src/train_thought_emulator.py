@@ -24,7 +24,7 @@ logging.disable(logging.WARNING)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 @torch.no_grad()
-def evaluate(dataloader, tokenizer, ctx, teacher, emulator, delta, subset, max_new_tokens):
+def evaluate(dataloader, tokenizer, ctx, teacher, emulator, delta, subset):
     total_instances = 0
     total_loss = 0
     for batch in tqdm.tqdm(dataloader):
@@ -48,7 +48,6 @@ def main():
     parser.add_argument('--train_path', type=str, required=True)
     parser.add_argument('--val_path', type=str, required=True)
     parser.add_argument('--save_model', type=str, required=True)
-    parser.add_argument('--max_new_tokens', type=int, default=128)
     parser.add_argument('--base_model', type=str, default='gpt2')
     parser.add_argument('--epochs', type=int, default=5)
     parser.add_argument('--batch_size', type=int, default=32)
@@ -113,7 +112,7 @@ def main():
             if step % 100 == 0:
                 print (f"Step: {step}. Loss: {loss}.")
             step += 1
-        loss = evaluate(val_dataloader, tokenizer, ctx, teacher, emulator, args.delta, args.subset, args.max_new_tokens)
+        loss = evaluate(val_dataloader, tokenizer, ctx, teacher, emulator, args.delta, args.subset)
         print (f'Val. Loss: {loss}.')
         emulator.save_pretrained(os.path.join(args.save_model, f'checkpoint_{epoch}'))
     
