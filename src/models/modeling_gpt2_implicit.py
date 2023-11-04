@@ -42,7 +42,7 @@ class GPT2ImplicitModel(GPT2Model):
         states_to_substitute=None,
         mode=None,
         residual=False,
-        clone=False,
+        requires_backward=False,
         phase2=False,
     ) -> Union[Tuple, BaseModelOutputWithPastAndCrossAttentions]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -230,7 +230,7 @@ class GPT2ImplicitModel(GPT2Model):
 
                 #zs_p.append(hidden_states.gather(1, positions_to_take.view(-1, 1, 1).expand(-1, -1, hidden_size)).squeeze(1))
                 hidden_states_orig = hidden_states
-                if clone:
+                if requires_backward:
                     hidden_states = hidden_states.clone()
                 if positions_to_take.eq(positions_to_take[0]).all():
                     hidden_states[:, positions_to_take[0]] = next_input
@@ -242,7 +242,7 @@ class GPT2ImplicitModel(GPT2Model):
                 hidden_size = hidden_states.shape[-1]
                 #zs.append(hidden_states.gather(1, first_ids.view(-1, 1, 1).expand(-1, -1, hidden_size)).squeeze(1))
                 hidden_states_orig = hidden_states
-                if clone:
+                if requires_backward:
                     hidden_states = hidden_states.clone()
                 if positions_to_substitute.eq(positions_to_substitute[0]).all():
                     hidden_states[:, positions_to_substitute[0]] = states_to_substitute[i]
@@ -367,7 +367,7 @@ class GPT2LMHeadImplicitModel(GPT2LMHeadModel):
         positions_to_substitute=None,
         states_to_substitute=None,
         residual=False,
-        clone=False,
+        requires_backward=False,
         phase2=False,
     ) -> Union[Tuple, CausalLMOutputWithCrossAttentions]:
         r"""
@@ -410,7 +410,7 @@ class GPT2LMHeadImplicitModel(GPT2LMHeadModel):
             positions_to_substitute=positions_to_substitute,
             states_to_substitute=states_to_substitute,
             residual=residual,
-            clone=clone,
+            requires_backward=requires_backward,
             mode=mode,
         )
         zs = transformer_outputs.zs

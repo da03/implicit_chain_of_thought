@@ -3,7 +3,6 @@ import os
 
 import torch
 import torch.nn as nn
-from torch.nn import CrossEntropyLoss
 from transformers import AutoTokenizer
 
 sys.path.append("..")
@@ -54,7 +53,7 @@ class Student(nn.Module):
 
         shift_logits = logits[..., :-1, :].contiguous()
         shift_labels = labels[..., 1:].contiguous()
-        loss_fct = CrossEntropyLoss()
+        loss_fct = nn.CrossEntropyLoss()
         loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
 
         outputs.loss = loss

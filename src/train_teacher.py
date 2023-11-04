@@ -1,15 +1,16 @@
 import math
 import torch
 from torch.utils.data import DataLoader
-from transformers import AutoModelForCausalLM, AutoTokenizer, AdamW
+from transformers import AdamW
 import argparse
 import os
-import sys
 import tqdm
+import inspect
+import logging
+
 from models.teacher import Teacher
 from models.configuration_teacher import TeacherConfig
 from data import CoTDataset, CoTDataCollator, extract_answer
-import logging
 
 from utils import get_sep_position
 
@@ -39,7 +40,7 @@ def evaluate(dataloader, tokenizer, ctx, teacher, max_new_tokens):
         labels = batch['labels_all'].to(device)
         # Remove answer part
         sep_positions = get_sep_position(input_ids_all, tokenizer.eos_token_id)
-        input_ids = input_ids_all[:, :sep_positions.max().item()+1]
+        input_ids = input_ids_all[:, :sep_positions.max()+1]
         batch_size = input_ids.shape[0]
         with ctx:
             outputs = teacher.compute_loss(input_ids=input_ids_all, labels=labels)

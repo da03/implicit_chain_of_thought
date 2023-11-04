@@ -21,6 +21,7 @@ class Teacher(nn.Module):
         self.tokenizer = AutoTokenizer.from_pretrained(config.tokenizer_name)
         num_layers = len(self.base_model.transformer.h)
         hidden_size = self.base_model.config.hidden_size
+        self.layer_norm = nn.LayerNorm(hidden_size, elementwise_affine=False)
         self.num_layers = num_layers
         self.hidden_size = hidden_size
 
@@ -77,6 +78,8 @@ class Teacher(nn.Module):
             else:
                 assert subset == 'bottom_row', subset
                 z = hidden_states[0].gather(1, positions_to_extract_per_layer[:,i].view(-1, 1, 1).expand(-1, -1, hidden_size)).squeeze(1)
+            # Apply layer norm to normalize to 0 mean and 1 std
+            z = self.layer_norm(z)
             teacher_states_extracted.append(z)
         return teacher_states_extracted
 

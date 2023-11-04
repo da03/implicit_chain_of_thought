@@ -102,37 +102,26 @@ TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python src/tr
 
 ```
 export FOLDER=data/4_by_4_mult
-export DELTA=0
+export DELTA=dynamic
 export MODEL=gpt2
-export LR=5e-5
-export M=1
-export FEED=p
-export USE=argmin
 export EPOCHS=40
+export LR=5e-5
 export BSZ=32
-export F=diagonal
-export QMODEL=train_models/4_by_4_mult/gpt2/teacher/checkpoint_1_5e-05_gpt2
+export MIXTURE_SIZE=1
+export TEACHER=train_models/4_by_4_mult/gpt2/teacher/checkpoint_0
 export SAVE=train_models/4_by_4_mult/gpt2/emulator_initial
 mkdir -p $SAVE
-CUDA_VISIBLE_DEVICES=3 TOKENIZERS_PARALLELISM=false stdbuf -oL -eL python src/train_thought_emulator.py \
-    --train_path ${FOLDER}/src1_train.txt \
-    --val_path ${FOLDER}/src1_valid.txt \
-    --test_path ${FOLDER}/src1_test_bigbench.txt \
+TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python src/train_thought_emulator.py \
+    --train_path ${FOLDER}/train.txt \
+    --val_path ${FOLDER}/valid.txt \
     --epochs $EPOCHS \
     --lr $LR \
-    --model $MODEL \
+    --base_model $MODEL \
     --batch_size $BSZ \
-    --qmodel $QMODEL \
-    --follow $F \
-    --feed $FEED \
-    --use $USE \
-    --no_save 0 \
+    --teacher $TEACHER \
     --save_model $SAVE \
-    --interval $DELTA \
-    --mixture_size $M \
-    --use_rnn 1 \
-    --use_attn 1 \
-    --no_mixture 1 \
+    --delta $DELTA \
+    --mixture_size ${MIXTURE_SIZE} \
     > ${SAVE}/log.train 2>&1&
 ```
 

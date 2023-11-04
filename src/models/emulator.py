@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 
 from .configuration_emulator import EmulatorConfig
 import sys
@@ -34,12 +35,17 @@ class Emulator(nn.Module):
         self.query_proj = nn.Linear(hidden_size, hidden_size)
         self.out_proj = nn.Linear(hidden_size*2, hidden_size)
 
-    def forward(self, input_ids):
+    def eval(self):
+        self.base_model.eval()
+
+    def forward(self, input_ids, requires_backward=False):
         sep_positions = get_sep_position(input_ids, self.tokenizer.eos_token_id)
+        input_ids = input_ids[:, :sep_positions.max()+1]
         outputs = self.base_model.forward(mode='forward_emulator', \
                 input_ids=input_ids, \
                 positions_to_take=sep_positions, \
-                softmax_temperature=self.config.softmax_temperature,
+                softmax_temperature=self.config.softmax_temperature, \
+                requires_backward=requires_backward, \
                 rnn=self.rnn, \
                 mlps=self.mlps, \
                 mixture_components=self.mixture_components, \
@@ -48,6 +54,19 @@ class Emulator(nn.Module):
                 out_proj=self.out_proj)
         emulated_teacher_states = outputs.f_h_cs
         return emulated_teacher_states
+
+    def compute_loss(self, input_ids, teacher_states):
+        emulated_teacher_states = self.forward(input_ids=input_ids, requires_backward=True)
+        batch_size = input_ids.shape[0]
+
+        loss_fct = nn.MSELoss(reduction='none')
+        loss = 0
+        for teacher_state, emulated_teacher_state in zip(teacher_states, emulated_teacher_states):
+            loss += loss_fct(teacher_state, emulated_teacher_state).sum(-1) / 2
+        loss = loss.mean()
+        outputs = CausalLMOutputWithCrossAttentions(loss=loss)
+        outputs.total_loss = loss * batch_size
+        return outputs
 
     @classmethod
     def from_pretrained(self, pretrained_path):

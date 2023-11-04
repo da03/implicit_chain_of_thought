@@ -1,18 +1,15 @@
 import math
 import torch
-import sys
-from torch.utils.data import Dataset, DataLoader
-from torch.nn import CrossEntropyLoss
-from transformers import AutoModelForCausalLM, AutoTokenizer, AdamW
+from torch.utils.data import DataLoader
+from transformers import AdamW
 import argparse
 import os
 import inspect
 import tqdm
-from data import CoTDataset, CoTDataCollator, extract_answer
 import logging
 import random
-import torch.nn as nn
 
+from data import CoTDataset, CoTDataCollator, extract_answer
 from models.teacher import Teacher
 from models.student import Student
 from models.configuration_student import StudentConfig
