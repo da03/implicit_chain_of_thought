@@ -77,6 +77,7 @@ class Emulator(nn.Module):
         return model
 
     def save_pretrained(self, save_directory):
+        print (f'Saving to {save_directory}')
         self.config.save_pretrained(save_directory)
         state_dict = self.state_dict()
         torch.save(state_dict, os.path.join(save_directory, 'state_dict.bin'))

@@ -99,10 +99,11 @@ def main():
         for batch in tqdm.tqdm(train_dataloader):
             #import pdb; pdb.set_trace()
             input_ids_cot = batch['input_ids_cot'].to(device)
+            input_ids_nocot = batch['input_ids_nocot'].to(device)
             with ctx:
                 with torch.no_grad():
                     teacher_states = teacher.extract_states(input_ids=input_ids_cot, delta=args.delta, subset=args.subset)
-                outputs = emulator.compute_loss(input_ids=input_ids_cot, teacher_states=teacher_states)
+                outputs = emulator.compute_loss(input_ids=input_ids_nocot, teacher_states=teacher_states)
             loss = outputs.loss
 
             loss.backward()

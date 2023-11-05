@@ -63,8 +63,8 @@ TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python src/tr
     --val_path ${FOLDER}/valid.txt \
     --epochs $EPOCHS \
     --lr $LR \
-    --base_model $MODEL \
     --batch_size $BSZ \
+    --base_model $MODEL \
     --save_model $SAVE \
     > ${SAVE}/log.train 2>&1&
 ```
@@ -88,8 +88,8 @@ TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python src/tr
     --val_path ${FOLDER}/valid.txt \
     --epochs $EPOCHS \
     --lr $LR \
-    --base_model $MODEL \
     --batch_size $BSZ \
+    --base_model $MODEL \
     --teacher $TEACHER \
     --save_model $SAVE \
     --delta $DELTA \
@@ -116,8 +116,8 @@ TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python src/tr
     --val_path ${FOLDER}/valid.txt \
     --epochs $EPOCHS \
     --lr $LR \
-    --base_model $MODEL \
     --batch_size $BSZ \
+    --base_model $MODEL \
     --teacher $TEACHER \
     --save_model $SAVE \
     --delta $DELTA \
@@ -131,33 +131,22 @@ TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python src/tr
 
 ```
 export FOLDER=data/4_by_4_mult
-export DELTA=0
-export M=1
-export E=6
 export EPOCHS=40
 export LR=5e-5
-export F=diagonal
-export MODEL=train_models/4_by_4_mult/gpt2/student_initial/checkpoint_3_5e-05
-export QMODEL=train_models/4_by_4_mult/gpt2/emulator_initial/checkpoint_${E}_5e-05
 export BSZ=32
-export A=1
-export T=1
+export STUDENT=train_models/4_by_4_mult/gpt2/student_initial/checkpoint_6
+export EMULATOR=train_models/4_by_4_mult/gpt2/emulator_initial/checkpoint_5
 export SAVE=train_models/4_by_4_mult/gpt2/
 mkdir -p $SAVE
 TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python src/train_coupled_emulator_and_student.py \
     --train_path ${FOLDER}/train.txt \
     --val_path ${FOLDER}/valid.txt \
-    --test_path ${FOLDER}/test_bigbench.txt \
     --epochs $EPOCHS \
     --lr $LR \
-    --model $MODEL \
     --batch_size $BSZ \
-    --qmodel $QMODEL \
+    --student $STUDENT \
+    --emulator $EMULATOR \
     --save_model $SAVE \
-    --accumulate $A \
-    --mixture_size $M \
-    --additional_norm 0 \
-    --no_mixture 1 \
     > ${SAVE}/log.train 2>&1&
 ```
 
