@@ -118,11 +118,11 @@ def main():
 
     # Create Optimizer
     if args.fix_emulator:
-        trainable_params = student.parameters()
+        trainable_params = list(student.parameters())
         for p in emulator.parameters():
             p.requires_grad = False
     else:
-        trainable_params = chain(student.parameters(), emulator.parameters())
+        trainable_params = list(student.parameters()) + list(emulator.parameters())
     use_fused = 'fused' in inspect.signature(torch.optim.AdamW).parameters
     extra_args = dict(fused=True) if use_fused else dict()
     optimizer = torch.optim.AdamW(trainable_params, lr=args.lr, **extra_args)

@@ -55,15 +55,16 @@ class Teacher(nn.Module):
             delta = int(delta)
         batch_size = input_ids.shape[0]
         hidden_size = self.hidden_size
-        # Forward the teacher to produce all hidden states
-        outputs = self.base_model.forward(input_ids=input_ids, output_hidden_states=True)
-        hidden_states = outputs.hidden_states[:-1]
 
         # Find the boundaries between input and CoT, and CoT and output
         # [input] first_sep_position [CoT] second_position [output] eos
         first_sep_positions = get_sep_position(input_ids, self.tokenizer.eos_token_id, skip=0)
         second_sep_positions = get_sep_position(input_ids, self.tokenizer.eos_token_id, skip=1)
         input_ids = input_ids[:, :second_sep_positions.max()+1]
+
+        # Forward the teacher to produce all hidden states
+        outputs = self.base_model.forward(input_ids=input_ids, output_hidden_states=True)
+        hidden_states = outputs.hidden_states[:-1]
 
         # Compute the positions to extract teacher states (t_l in the paper)
         positions_to_extract_per_layer = self.compute_positions_to_extract_per_layer(subset, delta, first_sep_positions, second_sep_positions)

@@ -4,6 +4,7 @@ from torch.utils.data import DataLoader
 from transformers import AdamW
 import argparse
 import os
+import sys
 import inspect
 import tqdm
 import logging
@@ -32,7 +33,6 @@ def evaluate(dataloader, tokenizer, ctx, teacher, student, delta, subset, max_ne
     total_correct_tokens = 0
     total_loss = 0
     for batch in tqdm.tqdm(dataloader):
-        #import pdb; pdb.set_trace()
         input_ids_all = batch['input_ids_all'].to(device)
         input_ids_nocot = batch['input_ids_nocot'].to(device)
         labels_nocot = batch['labels_nocot'].to(device)
@@ -118,7 +118,7 @@ def main():
     val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=False)
 
     # Create Optimizer
-    trainable_params = student.parameters()
+    trainable_params = list(student.parameters())
     use_fused = 'fused' in inspect.signature(torch.optim.AdamW).parameters
     extra_args = dict(fused=True) if use_fused else dict()
     optimizer = torch.optim.AdamW(trainable_params, lr=args.lr, **extra_args)
@@ -135,7 +135,6 @@ def main():
         print(f"Epoch {epoch}")
 
         for batch in tqdm.tqdm(train_dataloader):
-            #import pdb; pdb.set_trace()
             input_ids_all = batch['input_ids_all'].to(device)
             input_ids_nocot = batch['input_ids_nocot'].to(device)
             labels_nocot = batch['labels_nocot'].to(device)
@@ -153,6 +152,7 @@ def main():
             ppl = loss.exp().item()
             if step % 100 == 0:
                 print (f"Step: {step}. PPL: {ppl}. Token Accuracy: {token_accuracy}")
+                sys.stdout.flush()
             step += 1
         accuracy, token_accuracy, ppl = evaluate(val_dataloader, tokenizer, ctx, teacher, student, args.delta, args.subset, args.max_new_tokens)
         print (f'Val. PPL: {ppl}; Accuracy: {accuracy}; Token Accuracy: {token_accuracy}.')
