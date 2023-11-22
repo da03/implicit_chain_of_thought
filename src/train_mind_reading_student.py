@@ -11,6 +11,7 @@ import random
 
 from data import CoTDataset, CoTDataCollator, extract_answer
 from models.teacher import Teacher
+from models.autoencoder import AutoEncoder
 from models.student import Student
 from models.configuration_student import StudentConfig
 from utils import get_sep_position
@@ -25,7 +26,7 @@ logging.disable(logging.WARNING) # disable WARNING, INFO and DEBUG logging every
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 @torch.no_grad()
-def evaluate(dataloader, tokenizer, ctx, teacher, student, delta, subset, max_new_tokens):
+def evaluate(dataloader, tokenizer, ctx, teacher, autoencoder, student, delta, subset, max_new_tokens):
     total_instances = 0
     total_tokens = 0
     total_correct = 0
@@ -38,7 +39,10 @@ def evaluate(dataloader, tokenizer, ctx, teacher, student, delta, subset, max_ne
         labels_nocot = batch['labels_nocot'].to(device)
         batch_size = input_ids_nocot.shape[0]
         with ctx:
-            teacher_states = teacher.extract_states(input_ids=input_ids_all, delta=delta, subset=subset)
+            teacher_states = teacher.extract_states(input_ids=input_ids_all, delta=delta, subset=None)
+            teacher_states_cat = torch.stack(teacher_states, dim=-2) # bsz, seq_len, layers, hidden
+            encoded_states = autoencoder.encode(teacher_states_cat)
+            teacher_states = encoded_states.transpose(0, 1)
             outputs = student.compute_loss(input_ids=input_ids_nocot, labels=labels_nocot, teacher_states=teacher_states)
             loss = outputs.loss
             token_accuracy = outputs.token_accuracy.item()
@@ -81,6 +85,7 @@ def evaluate(dataloader, tokenizer, ctx, teacher, student, delta, subset, max_ne
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--teacher', type=str, required=True)
+    parser.add_argument('--autoencoder', type=str, required=True)
     parser.add_argument('--delta', type=str, required=True)
     parser.add_argument('--train_path', type=str, required=True)
     parser.add_argument('--val_path', type=str, required=True)
@@ -108,6 +113,7 @@ def main():
 
     # Load Teacher
     teacher = Teacher.from_pretrained(args.teacher).to(device).to(ptdtype)
+    autoencoder = AutoEncoder.from_pretrained(args.autoencoder).to(device).to(ptdtype)
 
     # Load data
     tokenizer = teacher.tokenizer
@@ -118,7 +124,7 @@ def main():
     val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=False)
 
     # Create Optimizer
-    trainable_params = student.parameters()
+    trainable_params = list(student.parameters())
     use_fused = 'fused' in inspect.signature(torch.optim.AdamW).parameters
     extra_args = dict(fused=True) if use_fused else dict()
     optimizer = torch.optim.AdamW(trainable_params, lr=args.lr, **extra_args)
@@ -141,7 +147,10 @@ def main():
             labels_nocot = batch['labels_nocot'].to(device)
             with ctx:
                 with torch.no_grad():
-                    teacher_states = teacher.extract_states(input_ids=input_ids_all, delta=args.delta, subset=args.subset)
+                    teacher_states = teacher.extract_states(input_ids=input_ids_all, delta=args.delta, subset=None)
+                    teacher_states_cat = torch.stack(teacher_states, dim=-2) # bsz, seq_len, layers, hidden
+                    encoded_states = autoencoder.encode(teacher_states_cat)
+                    teacher_states = encoded_states.transpose(0, 1)
                 outputs = student.compute_loss(input_ids=input_ids_nocot, labels=labels_nocot, teacher_states=teacher_states)
             loss = outputs.loss
             token_accuracy = outputs.token_accuracy.item()
@@ -154,7 +163,7 @@ def main():
             if step % 100 == 0:
                 print (f"Step: {step}. PPL: {ppl}. Token Accuracy: {token_accuracy}")
             step += 1
-        accuracy, token_accuracy, ppl = evaluate(val_dataloader, tokenizer, ctx, teacher, student, args.delta, args.subset, args.max_new_tokens)
+        accuracy, token_accuracy, ppl = evaluate(val_dataloader, tokenizer, ctx, teacher, autoencoder, student, args.delta, args.subset, args.max_new_tokens)
         print (f'Val. PPL: {ppl}; Accuracy: {accuracy}; Token Accuracy: {token_accuracy}.')
         student.save_pretrained(os.path.join(args.save_model, f'checkpoint_{epoch}'))
 

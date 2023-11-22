@@ -59,6 +59,9 @@ class Teacher(nn.Module):
         outputs = self.base_model.forward(input_ids=input_ids, output_hidden_states=True)
         hidden_states = outputs.hidden_states[:-1]
 
+        if subset == None:
+            return hidden_states
+
         # Find the boundaries between input and CoT, and CoT and output
         # [input] first_sep_position [CoT] second_position [output] eos
         first_sep_positions = get_sep_position(input_ids, self.tokenizer.eos_token_id, skip=0)
