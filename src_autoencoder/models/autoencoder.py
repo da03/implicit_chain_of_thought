@@ -70,6 +70,7 @@ class AutoEncoder(nn.Module):
         batch_size = teacher_states_cat.shape[0]
         seq_len = teacher_states_cat.shape[1]
         bottleneck = self.encode(teacher_states_cat)
+        teacher_states_cat = teacher_states_cat.view(batch_size, seq_len, -1)
         
         bottleneck = bottleneck.view(batch_size, 1, -1) # bz, 1, layers*hidden
         inputs_embeds = teacher_states_cat + bottleneck # bsz, seq_len, layers*hidden
