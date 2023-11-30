@@ -1,6 +1,6 @@
 import sys
 import os
-
+import logging
 import torch
 import torch.nn as nn
 from transformers import AutoTokenizer
@@ -91,7 +91,12 @@ class Student(nn.Module):
         config = StudentConfig.from_pretrained(pretrained_path)
         model = Student(config)
         state_dict = torch.load(os.path.join(pretrained_path, 'state_dict.bin'))
-        model.load_state_dict(state_dict)
+        try:
+            model.load_state_dict(state_dict)
+        except:
+            model.load_state_dict(state_dict, strict=False)
+            logging.warn("Some weights of the model Student checkpoint not loaded.")
+
         return model
 
     def save_pretrained(self, save_directory):
