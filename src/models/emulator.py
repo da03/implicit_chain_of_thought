@@ -11,7 +11,7 @@ import sys
 sys.path.append("..")
 from utils import get_sep_position
 from .modeling_gpt2_implicit import GPT2LMHeadImplicitModel
-
+import logging
 
 class Emulator(nn.Module):
     def __init__(self, config):
@@ -73,7 +73,11 @@ class Emulator(nn.Module):
         config = EmulatorConfig.from_pretrained(pretrained_path)
         model = Emulator(config)
         state_dict = torch.load(os.path.join(pretrained_path, 'state_dict.bin'))
-        model.load_state_dict(state_dict)
+        try:
+            model.load_state_dict(state_dict)
+        except:
+            model.load_state_dict(state_dict, strict=False)
+            logging.warn("Some weights of the model Emulator checkpoint not loaded.")
         return model
 
     def save_pretrained(self, save_directory):
