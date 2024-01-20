@@ -98,7 +98,7 @@ def main():
     ctx = torch.amp.autocast(device_type='cuda', dtype=ptdtype)
     print (ptdtype, dtype, device)
 
-    # Create Student 
+    # Create Teacher 
     config = TeacherConfig(base_model=args.base_model)
     teacher = Teacher(config).to(device).to(ptdtype)
 
