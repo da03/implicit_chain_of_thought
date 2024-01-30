@@ -79,7 +79,7 @@ def evaluate(dataloader, tokenizer, ctx, teacher, max_new_tokens):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train_path', type=str, required=True)
+    parser.add_argument('--train_path', type=str)
     parser.add_argument('--val_path', type=str, required=True)
     parser.add_argument('--save_model', type=str, required=True)
     parser.add_argument('--max_new_tokens', type=int, default=128)
