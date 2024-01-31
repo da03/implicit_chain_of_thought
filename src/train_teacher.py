@@ -79,9 +79,9 @@ def evaluate(dataloader, tokenizer, ctx, teacher, max_new_tokens):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train_path', type=str)
-    parser.add_argument('--val_path', type=str, required=True)
-    parser.add_argument('--save_model', type=str, required=True)
+    parser.add_argument('--train_path', type=str, default= "data/4_by_4_mult/train 2x2.txt")
+    parser.add_argument('--val_path', type=str, default= "data/4_by_4_mult/valid 2x2.txt")
+    parser.add_argument('--save_model', type=str, default= "train_models/4_by_4_mult/gpt2/teacher")
     parser.add_argument('--max_new_tokens', type=int, default=128)
     parser.add_argument('--base_model', type=str, default='gpt2')
     parser.add_argument('--epochs', type=int, default=1)
@@ -98,7 +98,7 @@ def main():
     ctx = torch.amp.autocast(device_type='cuda', dtype=ptdtype)
     print (ptdtype, dtype, device)
 
-    # Create Teacher 
+    # Create Student 
     config = TeacherConfig(base_model=args.base_model)
     teacher = Teacher(config).to(device).to(ptdtype)
 
