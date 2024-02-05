@@ -9,7 +9,7 @@ import logging
 import random
 import torch.nn as nn
 
-from data import CoTDataset, CoTDataCollator
+from data_2 import CoTDataset, CoTDataCollator
 from models.teacher import Teacher
 from models.emulator import Emulator
 from models.configuration_emulator import EmulatorConfig
@@ -29,11 +29,14 @@ def evaluate(dataloader, tokenizer, ctx, teacher, emulator, delta, subset):
     total_loss = 0
     for batch in tqdm.tqdm(dataloader):
         #import pdb; pdb.set_trace()
-        input_ids_cot = batch['input_ids_cot'].to(device)
-        batch_size = input_ids_cot.shape[0]
+        input_ids_cot_1 = batch['input_ids_cot_1'].to(device)
+        input_ids_cot_2 = batch['input_ids_cot_2'].to(device)
+        batch_size = input_ids_cot_1.shape[0]
         with ctx:
-            teacher_states = teacher.extract_states(input_ids=input_ids_cot, delta=delta, subset=subset)
-            outputs = emulator.compute_loss(input_ids=input_ids_cot, teacher_states=teacher_states)
+            teacher_states_1 = teacher.extract_states(input_ids=input_ids_cot_1, delta=delta, subset=subset)
+            teacher_states_2 = teacher.extract_states(input_ids=input_ids_cot_2, delta=delta, subset=subset)
+            
+            outputs = emulator.compute_loss(input_ids=torch.cat((input_ids_cot_1, input_ids_cot_2),1), teacher_states=teacher_states_1 + teacher_states_2)
             loss = outputs.loss
         total_loss += outputs.total_loss.item()
         total_instances += batch_size
@@ -43,8 +46,8 @@ def evaluate(dataloader, tokenizer, ctx, teacher, emulator, delta, subset):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--teacher', type=str, default = "data/4_by_4_mult/train.txt")
-    parser.add_argument('--delta', type=str, default = "data/4_by_4_mult/valid.txt")
+    parser.add_argument('--teacher', type=str, required = True)
+    parser.add_argument('--delta', type=str, required = True)
     parser.add_argument('--train_path', type=str, required=True)
     parser.add_argument('--val_path', type=str, required=True)
     parser.add_argument('--save_model', type=str, required=True)
@@ -98,11 +101,11 @@ def main():
 
         for batch in tqdm.tqdm(train_dataloader):
             #import pdb; pdb.set_trace()
-            input_ids_cot_1 = batch['input_ids_cot'].to(device)
-            input_ids_cot_2 = batch['input_ids_cot'].to(device)
+            input_ids_cot_1 = batch['input_ids_cot_1'].to(device)
+            input_ids_cot_2 = batch['input_ids_cot_2'].to(device)
             
-            input_ids_nocot_1 = batch['input_ids_nocot'].to(device)
-            input_ids_nocot_2 = batch['input_ids_nocot'].to(device)
+            input_ids_nocot_1 = batch['input_ids_nocot_1'].to(device)
+            input_ids_nocot_2 = batch['input_ids_nocot_2'].to(device)
             
             with ctx:
                 with torch.no_grad():
