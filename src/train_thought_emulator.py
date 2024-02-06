@@ -118,8 +118,8 @@ def main():
             
             with ctx:
                 with torch.no_grad():
-                    teacher_1_states = teacher.extract_states(input_ids=input_ids_cot_1, delta=args.delta, subset=args.subset)
-                    teacher_2_states = teacher.extract_states(input_ids=input_ids_cot_2, delta=args.delta, subset=args.subset)
+                    teacher_states_1 = teacher.extract_states(input_ids=input_ids_cot_1, delta=args.delta, subset=args.subset)
+                    teacher_states_2 = teacher.extract_states(input_ids=input_ids_cot_2, delta=args.delta, subset=args.subset)
                     
                     added_teacher_states = add_two_teacher_states(teacher_states_1,teacher_states_2)
                 outputs = emulator.compute_loss(input_ids=torch.cat((input_ids_nocot_1, input_ids_nocot_2),1), teacher_states=added_teacher_states)
