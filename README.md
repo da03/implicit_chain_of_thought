@@ -2,8 +2,7 @@
 
 Here we provide code to reproduce our results.
 
-# Approch to solve the Prof. Deng Challenge: 
-## 2 Multlipication at the same time
+## Approch to solve the Prof. Deng Challenge: 2 Multlipication at the same time
 
 1. We train the teacher with one multiplication.<br> 
 Example of training data: <br>
