@@ -6,12 +6,16 @@ Here we provide code to reproduce our results.
 ## 2 Multlipication at the same time
 
 1. We train the teacher with one multiplication.<br> 
-Example of Input: <br>
-5 6 3 2 * 7 4 3 4||5 5 5 6 1 + 0 0 6 4 9 0 ( 5 5 1 1 1 1 ) + 0 0 5 9 0 7 0 ( 5 5 6 0 2 8 0 ) + 0 0 0 0 6 4 9 0 #### 5 5 6 0 8 2 0 1
+Example of training data: <br>
+input:<br> 5 6 3 2 * 7 4 3 4 ||<br>
+Chain : <br>5 5 5 6 1 + 0 0 6 4 9 0 ( 5 5 1 1 1 1 ) + 0 0 5 9 0 7 0 ( 5 5 6 0 2 8 0 ) + 0 0 0 0 6 4 9 0 <br>
+output: <br>#### 5 5 6 0 8 2 0 1<br>
 <br>
 
 2. For the mind-reading teacher which would get data like this: <br>
-5 6 3 2 * 7 4 3 4 , 6 9 1 5 * 6 4 4 7 || 5 5 5 6 1 + 0 0 6 4 9 0 ( 5 5 1 1 1 1 ) + 0 0 5 9 0 7 0 ( 5 5 6 0 2 8 0 ) + 0 0 0 0 6 4 9 0 , 6 7 1 1 3 + 0 4 8 7 0 2 ( 6 1 0 9 3 2 ) + 0 0 4 8 7 0 2 ( 6 1 4 7 1 3 2 ) + 0 0 0 2 7 3 6 3 #### 5 5 6 0 8 2 0 1 , 6 1 4 9 8 6 8 3<br>
+input: <br>5 6 3 2 * 7 4 3 4 , 6 9 1 5 * 6 4 4 7 || <br>
+chain: 5 5 5 6 1 + 0 0 6 4 9 0 ( 5 5 1 1 1 1 ) + 0 0 5 9 0 7 0 ( 5 5 6 0 2 8 0 ) + 0 0 0 0 6 4 9 0 , 6 7 1 1 3 + 0 4 8 7 0 2 ( 6 1 0 9 3 2 ) + 0 0 4 8 7 0 2 ( 6 1 4 7 1 3 2 ) + 0 0 0 2 7 3 6 3 <br>
+output: <br>#### 5 5 6 0 8 2 0 1 , 6 1 4 9 8 6 8 3<br>
 we will use a different method and that is:<br>
 training the student to produce the answer using the summed up teacher states of two multplications. <br>
 
