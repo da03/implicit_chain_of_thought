@@ -10,7 +10,7 @@ import tqdm
 import logging
 import random
 
-from data import CoTDataset, CoTDataCollator, extract_answer
+from data_2 import CoTDataset, CoTDataCollator, extract_answer
 from models.teacher import Teacher
 from models.student import Student
 from models.configuration_student import StudentConfig
@@ -36,19 +36,29 @@ def evaluate(
     total_correct_tokens = 0
     total_loss = 0
     for batch in tqdm.tqdm(dataloader):
-        input_ids_all = batch["input_ids_all"].to(device)
-        input_ids_nocot = batch["input_ids_nocot"].to(device)
-        labels_nocot = batch["labels_nocot"].to(device)
-        batch_size = input_ids_nocot.shape[0]
+        input_ids_all_1 = batch["input_ids_all_1"].to(device)
+        input_ids_all_2 = batch["input_ids_all_2"].to(device)
+        input_ids_nocot_1 = batch["input_ids_nocot_1"].to(device)
+        input_ids_nocot_2 = batch["input_ids_nocot_2"].to(device)
+        labels_nocot_1 = batch["labels_nocot_1"].to(device)
+        labels_nocot_2 = batch["labels_nocot_2"].to(device)
+        batch_size = input_ids_nocot_1.shape[0]
         with ctx:
-            teacher_states = teacher.extract_states(
-                input_ids=input_ids_all, delta=delta, subset=subset
+            teacher_states_1 = teacher.extract_states(
+                input_ids=input_ids_all_1, delta=delta, subset=subset
             )
+            teacher_states_2 = teacher.extract_states(
+                input_ids=input_ids_all_2, delta=delta, subset=subset
+            )
+            
+            added_teacher_states = add_two_teacher_states(teacher_states_1,teacher_states_2)
+            
             outputs = student.compute_loss(
-                input_ids=input_ids_nocot,
-                labels=labels_nocot,
-                teacher_states=teacher_states,
+                input_ids=torch.cat((input_ids_nocot_1, input_ids_nocot_2),1),
+                labels=torch.cat((labels_nocot_1, labels_nocot_2),1),
+                teacher_states=added_teacher_states,
             )
+            
             loss = outputs.loss
             token_accuracy = outputs.token_accuracy.item()
         total_loss += outputs.total_loss.item()
@@ -58,33 +68,55 @@ def evaluate(
 
         # Generate
         with ctx:
-            beam_output = student.generate(
-                input_ids=input_ids_nocot,
-                teacher_states=teacher_states,
+            beam_output_1 = student.generate(
+                input_ids= input_ids_nocot_1,
+                teacher_states=teacher_states_1,
                 max_new_tokens=max_new_tokens,
             )
-
-        # Evaluate
-        sep_positions = get_sep_position(input_ids_all, tokenizer.eos_token_id)
-        for i, (input_ids_all_i, beam_output_i) in enumerate(
-            zip(input_ids_all, beam_output)
-        ):
-            sep_position = sep_positions[i].item()
-            tgt = input_ids_all_i[sep_position + 1 :]
-            tgt_text = tokenizer.decode(tgt, skip_special_tokens=True)
-            ans = extract_answer(tgt_text)
-            pred_text = tokenizer.decode(
-                beam_output_i[0][sep_position + 1 :], skip_special_tokens=True
+            
+            beam_output_2 = student.generate(
+                input_ids= input_ids_nocot_2,
+                teacher_states=teacher_states_2,
+                max_new_tokens=max_new_tokens,
             )
-            pred_ans = extract_answer(pred_text)
-            if ans == pred_ans:
+            
+        # Evaluate
+        sep_positions_1 = get_sep_position(input_ids_all_1, tokenizer.eos_token_id)
+        sep_positions_2 = get_sep_position(input_ids_all_2, tokenizer.eos_token_id)
+        
+        for i, (input_ids_all_1_i, beam_output_1_i,input_ids_all_2_i, beam_output_2_i) in enumerate(
+            zip(input_ids_all_1, beam_output_1 , input_ids_all_2, beam_output_2)
+        ):
+            sep_position_1 = sep_positions_1[i].item()
+            tgt_1 = input_ids_all_1_i[sep_position_1 + 1 :]
+            tgt_text_1 = tokenizer.decode(tgt_1, skip_special_tokens=True)
+            ans_1 = extract_answer(tgt_text_1)
+            pred_text_1 = tokenizer.decode(
+                beam_output_1_i[0][sep_position_1 + 1 :], skip_special_tokens=True
+            )
+            pred_ans_1 = extract_answer(pred_text_1)
+            
+            sep_position_2 = sep_positions_2[i].item()
+            tgt_2 = input_ids_all_2_i[sep_position_2 + 1 :]
+            tgt_text_2 = tokenizer.decode(tgt_2, skip_special_tokens=True)
+            ans_2 = extract_answer(tgt_text_2)
+            pred_text_2 = tokenizer.decode(
+                beam_output_2_i[0][sep_position_2 + 1 :], skip_special_tokens=True
+            )
+            pred_ans_2 = extract_answer(pred_text_2)
+            
+            if ans_1 + ' , ' + ans_2 == pred_ans_1 + ' , '+ pred_ans_2:
                 total_correct += 1
             if i == 0:
                 print(
-                    f"Input: {tokenizer.decode(input_ids_all_i[:sep_position], skip_special_tokens=True)}"
+                    f"Input: {tokenizer.decode(input_ids_all_1_i[:sep_position_1], skip_special_tokens=True)}"
                 )
-                print(f"Target: {tgt_text}")
-                print(f"Predicted: {pred_text}")
+                print(
+                    f"Input: {tokenizer.decode(input_ids_all_2_i[:sep_position_2], skip_special_tokens=True)}"
+                )                
+                
+                print(f"Target: {tgt_text_1+ ' , ' + tgt_text_2}")
+                print(f"Predicted: {pred_text_1 + ' , '+pred_text_2}")
                 print("")
     accuracy = total_correct / total_instances
     token_accuracy = total_correct_tokens / total_tokens
@@ -92,17 +124,23 @@ def evaluate(
     ppl = math.exp(loss)
     return accuracy, token_accuracy, ppl
 
+def add_two_teacher_states(teacher_states_1, teacher_states_2):
+    added_teacher_states = []
+    for t1,t2 in zip(teacher_states_1, teacher_states_2):
+        added_teacher_states.append(torch.add(t1,t2))
+    return added_teacher_states
+    pass
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--teacher", type=str, required=True)
-    parser.add_argument("--delta", type=str, required=True)
-    parser.add_argument("--train_path", type=str, required=True)
-    parser.add_argument("--val_path", type=str, required=True)
-    parser.add_argument("--save_model", type=str, required=True)
+    parser.add_argument("--teacher", type=str, default="train_models/4_by_4_mult/gpt2/teacher/checkpoint_0")
+    parser.add_argument("--delta", type=str, default="dynamic")
+    parser.add_argument("--train_path", type=str, default="data/4_by_4_mult/train_sample.txt")
+    parser.add_argument("--val_path", type=str, default="data/4_by_4_mult/valid_sample.txt")
+    parser.add_argument("--save_model", type=str, default="train_models/4_by_4_mult/gpt2/student_initial")
     parser.add_argument("--max_new_tokens", type=int, default=128)
     parser.add_argument("--base_model", type=str, default="gpt2")
-    parser.add_argument("--epochs", type=int, default=5)
+    parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--max_grad_norm", type=float, default=1.0)
@@ -163,19 +201,31 @@ def main():
         print(f"Epoch {epoch}")
 
         for batch in tqdm.tqdm(train_dataloader):
-            input_ids_all = batch["input_ids_all"].to(device)
-            input_ids_nocot = batch["input_ids_nocot"].to(device)
-            labels_nocot = batch["labels_nocot"].to(device)
+            input_ids_all_1 = batch["input_ids_all_1"].to(device)
+            input_ids_all_2 = batch["input_ids_all_2"].to(device)
+            input_ids_nocot_1 = batch["input_ids_nocot_1"].to(device)
+            input_ids_nocot_2 = batch["input_ids_nocot_2"].to(device)
+            labels_nocot_1 = batch["labels_nocot_1"].to(device)
+            labels_nocot_2 = batch["labels_nocot_2"].to(device)
+            
             with ctx:
                 with torch.no_grad():
-                    teacher_states = teacher.extract_states(
-                        input_ids=input_ids_all, delta=args.delta, subset=args.subset
+                    teacher_states_1 = teacher.extract_states(
+                        input_ids=input_ids_all_1, delta=args.delta, subset=args.subset
                     )
+
+                    teacher_states_2 = teacher.extract_states(
+                        input_ids=input_ids_all_2, delta=args.delta, subset=args.subset
+                    )
+                    
+                added_teacher_states = add_two_teacher_states(teacher_states_1,teacher_states_2)   
+                    
                 outputs = student.compute_loss(
-                    input_ids=input_ids_nocot,
-                    labels=labels_nocot,
-                    teacher_states=teacher_states,
+                    input_ids=torch.cat((input_ids_nocot_1, input_ids_nocot_2),1),
+                    labels=torch.cat((labels_nocot_1, labels_nocot_2),1),
+                    teacher_states=added_teacher_states,
                 )
+                
             loss = outputs.loss
             token_accuracy = outputs.token_accuracy.item()
 
