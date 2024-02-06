@@ -36,13 +36,22 @@ def evaluate(dataloader, tokenizer, ctx, teacher, emulator, delta, subset):
             teacher_states_1 = teacher.extract_states(input_ids=input_ids_cot_1, delta=delta, subset=subset)
             teacher_states_2 = teacher.extract_states(input_ids=input_ids_cot_2, delta=delta, subset=subset)
             
-            outputs = emulator.compute_loss(input_ids=torch.cat((input_ids_cot_1, input_ids_cot_2),1), teacher_states=teacher_states_1 + teacher_states_2)
+            added_teacher_states = add_two_teacher_states(teacher_states_1, teacher_states_2)
+            
+            outputs = emulator.compute_loss(input_ids=torch.cat((input_ids_cot_1, input_ids_cot_2),1), teacher_states=added_teacher_states)
             loss = outputs.loss
         total_loss += outputs.total_loss.item()
         total_instances += batch_size
 
     loss = total_loss / total_instances
     return loss
+
+def add_two_teacher_states(teacher_states_1, teacher_states_2):
+    added_teacher_states = []
+    for t1,t2 in zip(teacher_states_1, teacher_states_2):
+        added_teacher_states.append(torch.add(t1,t2))
+    return added_teacher_states
+    pass
 
 def main():
     parser = argparse.ArgumentParser()
@@ -112,7 +121,8 @@ def main():
                     teacher_1_states = teacher.extract_states(input_ids=input_ids_cot_1, delta=args.delta, subset=args.subset)
                     teacher_2_states = teacher.extract_states(input_ids=input_ids_cot_2, delta=args.delta, subset=args.subset)
                     
-                outputs = emulator.compute_loss(input_ids=torch.cat((input_ids_nocot_1, input_ids_nocot_2),1), teacher_states=teacher_1_states+teacher_2_states)
+                    added_teacher_states = add_two_teacher_states(teacher_states_1,teacher_states_2)
+                outputs = emulator.compute_loss(input_ids=torch.cat((input_ids_nocot_1, input_ids_nocot_2),1), teacher_states=added_teacher_states)
             loss = outputs.loss
 
             loss.backward()
