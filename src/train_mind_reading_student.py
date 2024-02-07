@@ -109,13 +109,9 @@ def evaluate(
                 total_correct += 1
             if i == 0:
                 print(
-                    f"Input: {tokenizer.decode(input_ids_all_1_i[:sep_position_1], skip_special_tokens=True)}"
-                )
-                print(
-                    f"Input: {tokenizer.decode(input_ids_all_2_i[:sep_position_2], skip_special_tokens=True)}"
-                )                
-                
-                print(f"Target: {tgt_text_1+ ' , ' + tgt_text_2}")
+                    f"Input: {tokenizer.decode(input_ids_all_1_i[:sep_position_1], skip_special_tokens=True)} , {tokenizer.decode(input_ids_all_2_i[:sep_position_2], skip_special_tokens=True)}"
+                )                          
+                print(f"Target: {extract_answer(tgt_text_1)+ ' , ' + extract_answer(tgt_text_2)}")
                 print(f"Predicted: {pred_text_1 + ' , '+pred_text_2}")
                 print("")
     accuracy = total_correct / total_instances
@@ -141,7 +137,7 @@ def main():
     parser.add_argument("--max_new_tokens", type=int, default=128)
     parser.add_argument("--base_model", type=str, default="gpt2")
     parser.add_argument("--epochs", type=int, default=1)
-    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--max_grad_norm", type=float, default=1.0)
     parser.add_argument(

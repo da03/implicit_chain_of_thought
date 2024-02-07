@@ -10,7 +10,7 @@ import logging
 import random
 from itertools import chain
 
-from data import CoTDataset, CoTDataCollator, extract_answer
+from data_2 import CoTDataset, CoTDataCollator, extract_answer
 from models.student import Student
 from models.emulator import Emulator
 from utils import get_sep_position
@@ -33,12 +33,14 @@ def evaluate(dataloader, tokenizer, ctx, emulator, student, max_new_tokens):
     total_loss = 0
     for batch in tqdm.tqdm(dataloader):
         #import pdb; pdb.set_trace()
-        input_ids_nocot = batch['input_ids_nocot'].to(device)
-        labels_nocot = batch['labels_nocot'].to(device)
-        batch_size = input_ids_nocot.shape[0]
+        input_ids_nocot_1 = batch['input_ids_nocot_1'].to(device)
+        input_ids_nocot_2 = batch['input_ids_nocot_2'].to(device)
+        labels_nocot_1 = batch['labels_nocot_1'].to(device)
+        labels_nocot_2 = batch['labels_nocot_2'].to(device)
+        batch_size = input_ids_nocot_1.shape[0]
         with ctx:
-            emulated_teacher_states = emulator(input_ids=input_ids_nocot)
-            outputs = student.compute_loss(input_ids=input_ids_nocot, labels=labels_nocot, teacher_states=emulated_teacher_states)
+            emulated_teacher_states = emulator(input_ids=torch.cat((input_ids_nocot_1 , input_ids_nocot_2),1))
+            outputs = student.compute_loss(input_ids=torch.cat((input_ids_nocot_1 , input_ids_nocot_2),1), labels=torch.cat((labels_nocot_1 , labels_nocot_2),1), teacher_states=emulated_teacher_states)
             loss = outputs.loss
             token_accuracy = outputs.token_accuracy.item()
         total_loss += outputs.total_loss.item()
@@ -48,28 +50,51 @@ def evaluate(dataloader, tokenizer, ctx, emulator, student, max_new_tokens):
 
         # Generate
         with ctx:
-            beam_output = student.generate(
-                input_ids=input_ids_nocot,
+            beam_output_1 = student.generate(
+                input_ids=input_ids_nocot_1,
+                teacher_states=emulated_teacher_states,
+                max_new_tokens=max_new_tokens,
+            )
+            beam_output_2= student.generate(
+                input_ids=input_ids_nocot_2,
                 teacher_states=emulated_teacher_states,
                 max_new_tokens=max_new_tokens,
             )
 
         # Evaluate
-        sep_positions = get_sep_position(input_ids_nocot, tokenizer.eos_token_id)
-        for i, (input_ids_i, beam_output_i) in enumerate(zip(input_ids_nocot, beam_output)):
-            sep_position = sep_positions[i].item()
-            tgt = input_ids_i[sep_position+1:]
-            tgt_text = tokenizer.decode(tgt, skip_special_tokens=True)
-            ans = extract_answer(tgt_text)
-            pred_text = tokenizer.decode(beam_output_i[0][sep_position+1:], skip_special_tokens=True)
-            pred_ans = extract_answer(pred_text)
-            if ans == pred_ans:
+        sep_positions_1 = get_sep_position(input_ids_nocot_1, tokenizer.eos_token_id)
+        sep_positions_2 = get_sep_position(input_ids_nocot_2, tokenizer.eos_token_id)
+        
+        for i, (input_ids_nocot_1_i, beam_output_1_i,input_ids_nocot_2_i, beam_output_2_i) in enumerate(
+            zip(input_ids_nocot_1, beam_output_1 , input_ids_nocot_2, beam_output_2)
+        ):
+            sep_position_1 = sep_positions_1[i].item()
+            tgt_1 = input_ids_nocot_1_i[sep_position_1 + 1 :]
+            tgt_text_1 = tokenizer.decode(tgt_1, skip_special_tokens=True)
+            ans_1 = extract_answer(tgt_text_1)
+            pred_text_1 = tokenizer.decode(
+                beam_output_1_i[0][sep_position_1 + 1 :], skip_special_tokens=True
+            )
+            pred_ans_1 = extract_answer(pred_text_1)
+            
+            sep_position_2 = sep_positions_2[i].item()
+            tgt_2 = input_ids_nocot_2_i[sep_position_2 + 1 :]
+            tgt_text_2 = tokenizer.decode(tgt_2, skip_special_tokens=True)
+            ans_2 = extract_answer(tgt_text_2)
+            pred_text_2 = tokenizer.decode(
+                beam_output_2_i[0][sep_position_2 + 1 :], skip_special_tokens=True
+            )
+            pred_ans_2 = extract_answer(pred_text_2)
+            
+            if ans_1 + ' , ' + ans_2 == pred_ans_1 + ' , '+ pred_ans_2:
                 total_correct += 1
             if i == 0:
-                print (f'Input: {tokenizer.decode(input_ids_i[:sep_position], skip_special_tokens=True)}')
-                print (f'Target: {tgt_text}')
-                print (f'Predicted: {pred_text}')
-                print ('')
+                print(
+                    f"Input: {tokenizer.decode(input_ids_nocot_1_i[:sep_position_1], skip_special_tokens=True)} , {tokenizer.decode(input_ids_nocot_2_i[:sep_position_2], skip_special_tokens=True)}"
+                )                          
+                print(f"Target: {extract_answer(tgt_text_1)+ ' , ' + extract_answer(tgt_text_2)}")
+                print(f"Predicted: {pred_text_1 + ' , '+pred_text_2}")
+                print("")
     accuracy = total_correct / total_instances
     token_accuracy = total_correct_tokens / total_tokens
     loss = total_loss / total_tokens
@@ -138,11 +163,13 @@ def main():
 
         for batch in tqdm.tqdm(train_dataloader):
             #import pdb; pdb.set_trace()
-            input_ids_nocot = batch['input_ids_nocot'].to(device)
-            labels_nocot = batch['labels_nocot'].to(device)
+            input_ids_nocot_1 = batch['input_ids_nocot_1'].to(device)
+            input_ids_nocot_2= batch['input_ids_nocot_2'].to(device)
+            labels_nocot_1 = batch['labels_nocot_1'].to(device)
+            labels_nocot_2 = batch['labels_nocot_2'].to(device)
             with ctx:
-                emulated_teacher_states = emulator(input_ids_nocot, requires_backward=not args.fix_emulator)
-                outputs = student.compute_loss(input_ids=input_ids_nocot, labels=labels_nocot, teacher_states=emulated_teacher_states)
+                emulated_teacher_states = emulator(torch.cat((input_ids_nocot_1 , input_ids_nocot_2),1), requires_backward=not args.fix_emulator)
+                outputs = student.compute_loss(input_ids=torch.cat((input_ids_nocot_1 , input_ids_nocot_2),1), labels=torch.cat((labels_nocot_1 , labels_nocot_2),1), teacher_states=emulated_teacher_states)
             loss = outputs.loss
             token_accuracy = outputs.token_accuracy.item()
 

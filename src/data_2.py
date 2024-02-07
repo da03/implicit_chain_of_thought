@@ -224,6 +224,7 @@ class CoTDataset(Dataset):
         temp_tgt_len = 0
         temp_count = 0
         separator = tokenizer(bos_tok, add_special_tokens=False)['input_ids'][0]
+        
         for i, elem in enumerate(self.labels_nocot_2):
             sep_idx = elem.index(separator) + 1
             self.src_sent_nocot_2.append(self.examples_nocot_2[i][:sep_idx-1])
