@@ -3,12 +3,7 @@
 
 This project tries to solve the Prof. Deng challenge to achieve two multiplications at the same time using Implicit Chain of Thought (ICoT). 
 
-## Approaches
-
-### 1. Summed up hidden states
-
-In this approach, we train the teacher on one multiplication data from original paper. Later, we will use this teachers to extract hidden states. <br>
-
+## Data Format
 The format of training, validation, and test files for training the teaher looks like below:
 
 ```
@@ -25,6 +20,13 @@ As an example, let's take a look at the first line from the 4 X 4 Mult test set 
 ```
 
 In this example, the input is `9 1 7 3 * 9 4 3 3` (corresponding to `3719*3349`), the chain-of-thought is `1 7 4 3 3 + 0 6 7 8 4 1 ( 1 3 2 2 8 1 ) + 0 0 7 5 1 1 1 ( 1 3 9 7 9 2 1 ) + 0 0 0 7 5 1 1 1`, and the output is `1 3 9 4 5 4 2 1` (corresponding to `12454931`).
+
+## Approaches
+
+### 1. Summed up hidden states
+
+In this approach, we train the teacher on one multiplication data from original paper. Later, we will use this teachers to extract hidden states. <br>
+
 
 After training the teacher, we need to combine two rows from original data to create train_combined (or as I called it train 2x2) using the code below. 
 
