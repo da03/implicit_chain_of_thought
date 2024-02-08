@@ -83,15 +83,27 @@ An exmaple of this dataset:
 
 The idea to solve the problem is to find the hidden states of each multiplication separately, and add them together. Hence, in the <b>Second Step</b> we train a mind-reading student to predict outputs using summed up hidden states. <br>
 
-<b> Third Step </b> would be training an emulator to predict summed up hidden states. <b> Forth Step </b> is to combine the emulator and student to predict answers. 
+![](imgs/Sum_Student.png)
 
-    <b> Note: </b> The advantage of this technique is its flexibility. For instance, we can find the dot product of hidden states instead of adding them or we can use any other function. 
+<b> Third Step </b> would be training an emulator to predict summed up hidden states. <b> <br>
+
+![](imgs/Sum_Emulator.png)
+
+<br>
+Fourth Step </b> is to combine the emulator and student to predict answers. 
+
+<b> Note: </b> The advantage of this technique is its flexibility. For instance, we can find the dot product of hidden states instead of adding them or we can use any other function. 
+
 ### 2. Stacking hidden states
 
 In this approach, after extracting the hidden states from each mulitplication, instead of adding them together, we would stack and append them together and create a list of hidden states with twice the length. After that, we teach the student to predict answers using stacked hidden states.
 
+![](imgs/Stack_Student.png)
+
 ### Note: 
 In the original paper of Implicit Chain of Thought, the authors took only one hidden states from each layers using different methods, for example, they would select them diagonaly or dynamicly according to a formula. However, these methods are not guaranteed to yeild the best results in our cases. 
+
+
 
 
 
