@@ -172,13 +172,12 @@ TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python src/ge
 ## Citation
 
 ```
-@inproceedings{
-    anonymous2023implicit,
-    title={Implicit Chain of Thought Reasoning via Knowledge Distillation},
-    author={Anonymous},
-    booktitle={Submitted to The Twelfth International Conference on Learning Representations},
-    year={2023},
-    url={https://openreview.net/forum?id=9cumTvvlHG},
-    note={under review}
+@misc{deng2023implicit,
+      title={Implicit Chain of Thought Reasoning via Knowledge Distillation}, 
+      author={Yuntian Deng and Kiran Prasad and Roland Fernandez and Paul Smolensky and Vishrav Chaudhary and Stuart Shieber},
+      year={2023},
+      eprint={2311.01460},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL}
 }
 ```
