@@ -9,14 +9,24 @@ sys.path.append("..")
 from utils import get_sep_position
 from .configuration_student import StudentConfig
 from .modeling_gpt2_implicit import GPT2LMHeadImplicitModel
+from .modeling_llama_implicit import ImplicitLlamaForCausalLM
 
 class Student(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, nopretrain=False):
         super().__init__()
         self.config = config
-        self.base_model = GPT2LMHeadImplicitModel.from_pretrained(config.base_model)
+        if 'gpt2' in config.base_model:
+            self.base_model = GPT2LMHeadImplicitModel.from_pretrained(config.base_model)
+            num_layers = self.base_model.config.n_layer
+        else:
+            self.base_model = ImplicitLlamaForCausalLM.from_pretrained(config.base_model)
+            num_layers = self.base_model.config.num_hidden_layers
+        #self.base_model = GPT2LMHeadImplicitModel.from_pretrained(config.base_model)
+        if nopretrain:
+            print ('NO PRETRAIN')
+            self.base_model.apply(self.base_model._init_weights)
         self.tokenizer = AutoTokenizer.from_pretrained(config.tokenizer_name)
-        num_layers = len(self.base_model.transformer.h)
+        #num_layers = len(self.base_model.transformer.h)
         hidden_size = self.base_model.config.hidden_size
         self.num_layers = num_layers
         self.hidden_size = hidden_size
@@ -39,6 +49,7 @@ class Student(nn.Module):
         #import pdb; pdb.set_trace()
         sep_positions = get_sep_position(input_ids, self.tokenizer.eos_token_id)
         # First, project teacher states
+        #import pdb; pdb.set_trace()
         teacher_states = [self.mlps[l](teacher_states[l]) for l in range(len(teacher_states))]
 
         # Forward while substituting teacher states

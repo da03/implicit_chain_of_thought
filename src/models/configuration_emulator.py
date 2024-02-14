@@ -5,7 +5,7 @@ class EmulatorConfig(PretrainedConfig):
         self,
         base_model='gpt2',
         tokenizer_name='gpt2',
-        mixture_size=1,
+        mixture_size='1',
         softmax_temperature=0.05,
         **kwargs,
     ):

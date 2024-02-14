@@ -4,6 +4,7 @@ from torch.utils.data import DataLoader
 from transformers import AdamW
 import argparse
 import os
+import sys
 import tqdm
 import inspect
 import logging
@@ -88,6 +89,7 @@ def main():
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--lr', type=float, default=5e-5)
     parser.add_argument('--max_grad_norm', type=float, default=1.0)
+    parser.add_argument('--nopretrain', dest='nopretrain', action='store_true')
     args = parser.parse_args()
 
     print (args)
@@ -100,7 +102,7 @@ def main():
 
     # Create Teacher 
     config = TeacherConfig(base_model=args.base_model)
-    teacher = Teacher(config).to(device).to(ptdtype)
+    teacher = Teacher(config, nopretrain=args.nopretrain).to(device).to(ptdtype)
 
     # Load data
     tokenizer = teacher.tokenizer
@@ -138,6 +140,7 @@ def main():
             ppl = loss.exp().item()
             if step % 100 == 0:
                 print (f"Step: {step}. PPL: {ppl}. Token Accuracy: {token_accuracy}")
+                sys.stdout.flush()
             step += 1
         accuracy, token_accuracy, ppl = evaluate(val_dataloader, tokenizer, ctx, teacher, args.max_new_tokens)
         print (f'Val. PPL: {ppl}; Accuracy: {accuracy}; Token Accuracy: {token_accuracy}.')

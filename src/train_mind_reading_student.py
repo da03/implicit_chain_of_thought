@@ -92,6 +92,7 @@ def main():
     parser.add_argument('--lr', type=float, default=5e-5)
     parser.add_argument('--max_grad_norm', type=float, default=1.0)
     parser.add_argument('--subset', type=str, choices=['diagonal', 'last_column', 'top_row', 'bottom_row', 'first_column'], default='diagonal')
+    parser.add_argument('--nopretrain', dest='nopretrain', action='store_true')
     args = parser.parse_args()
 
     print (args)
@@ -104,7 +105,7 @@ def main():
 
     # Create Student
     config = StudentConfig(base_model=args.base_model)
-    student = Student(config).to(device).to(ptdtype)
+    student = Student(config, nopretrain=args.nopretrain).to(device).to(ptdtype)
 
     # Load Teacher
     teacher = Teacher.from_pretrained(args.teacher).to(device).to(ptdtype)

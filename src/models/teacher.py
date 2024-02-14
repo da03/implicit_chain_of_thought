@@ -11,15 +11,24 @@ import sys
 sys.path.append("..")
 from utils import get_sep_position, DoubleEOSStoppingCriteria, DoubleEOSLogitsProcessor
 from .modeling_gpt2_implicit import GPT2LMHeadImplicitModel
+from .modeling_llama_implicit import ImplicitLlamaForCausalLM
 
 
 class Teacher(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, nopretrain=False):
         super().__init__()
         self.config = config
-        self.base_model = GPT2LMHeadImplicitModel.from_pretrained(config.base_model)
+        if 'gpt2' in config.base_model:
+            self.base_model = GPT2LMHeadImplicitModel.from_pretrained(config.base_model)
+            num_layers = self.base_model.config.n_layer
+        else:
+            self.base_model = ImplicitLlamaForCausalLM.from_pretrained(config.base_model)
+            num_layers = self.base_model.config.num_hidden_layers
+        if nopretrain:
+            print ('NO PRETRAIN')
+            self.base_model.apply(self.base_model._init_weights)
         self.tokenizer = AutoTokenizer.from_pretrained(config.tokenizer_name)
-        num_layers = len(self.base_model.transformer.h)
+        #num_layers = len(self.base_model.transformer.h)
         hidden_size = self.base_model.config.hidden_size
         self.layer_norm = nn.LayerNorm(hidden_size, elementwise_affine=False)
         self.num_layers = num_layers
@@ -50,7 +59,7 @@ class Teacher(nn.Module):
             positions_to_extract_per_layer[batch_id] = positions_to_extract
         return positions_to_extract_per_layer
 
-    def extract_states(self, input_ids, delta, subset='diagonal'):
+    def extract_states(self, input_ids, delta, subset='diagonal', return_positions=False):
         if delta.isnumeric():
             delta = int(delta)
         batch_size = input_ids.shape[0]
@@ -82,7 +91,9 @@ class Teacher(nn.Module):
             # Apply layer norm to normalize to 0 mean and 1 std
             z = self.layer_norm(z)
             teacher_states_extracted.append(z)
-        return teacher_states_extracted
+        if not return_positions:
+            return teacher_states_extracted
+        return teacher_states_extracted, positions_to_extract_per_layer
 
     def compute_loss(self, input_ids, labels):
         #import pdb; pdb.set_trace()
@@ -158,7 +169,7 @@ class Teacher(nn.Module):
         config = TeacherConfig.from_pretrained(pretrained_path)
         model = Teacher(config)
         state_dict = torch.load(os.path.join(pretrained_path, 'state_dict.bin'))
-        model.load_state_dict(state_dict)
+        model.load_state_dict(state_dict, strict=False)
         return model
 
     def save_pretrained(self, save_directory):

@@ -4,6 +4,7 @@ from torch.utils.data import DataLoader
 from transformers import AdamW
 import argparse
 import os
+import sys
 import inspect
 import tqdm
 import logging
@@ -83,6 +84,7 @@ def main():
     parser.add_argument('--student', type=str, required=True)
     parser.add_argument('--train_path', type=str, required=True)
     parser.add_argument('--val_path', type=str, required=True)
+    parser.add_argument('--test_path', type=str, required=True)
     parser.add_argument('--save_model', type=str, required=True)
     parser.add_argument('--max_new_tokens', type=int, default=128)
     parser.add_argument('--epochs', type=int, default=5)
@@ -92,6 +94,8 @@ def main():
     parser.add_argument('--softmax_temperature', type=float, default=0.05)
     parser.add_argument('--fix_emulator', dest='fix_emulator', action='store_true')
     parser.set_defaults(fix_emulator=False)
+    parser.add_argument('--fix_student', dest='fix_student', action='store_true')
+    parser.set_defaults(fix_student=False)
     args = parser.parse_args()
 
     print (args)
@@ -107,6 +111,7 @@ def main():
 
     # Load Emulator
     emulator = Emulator.from_pretrained(args.emulator).to(device).to(ptdtype)
+    emulator.config.softmax_temperature = args.softmax_temperature
 
     # Load data
     tokenizer = emulator.tokenizer
@@ -116,10 +121,18 @@ def main():
     val_dataset = CoTDataset(tokenizer, args.val_path, 1024)
     val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=False)
 
+    test_dataset = CoTDataset(tokenizer, args.test_path, 1024)
+    test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, collate_fn=collate_fn, shuffle=False)
+
     # Create Optimizer
+    assert not (args.fix_emulator and args.fix_student)
     if args.fix_emulator:
         trainable_params = list(student.parameters())
         for p in emulator.parameters():
+            p.requires_grad = False
+    elif args.fix_student:
+        trainable_params = list(emulator.parameters())
+        for p in student.parameters():
             p.requires_grad = False
     else:
         trainable_params = list(student.parameters()) + list(emulator.parameters())
@@ -153,9 +166,13 @@ def main():
             ppl = loss.exp().item()
             if step % 100 == 0:
                 print (f"Step: {step}. PPL: {ppl}. Token Accuracy: {token_accuracy}")
+                sys.stdout.flush()
             step += 1
         accuracy, token_accuracy, ppl = evaluate(val_dataloader, tokenizer, ctx, emulator, student, args.max_new_tokens)
         print (f'Val. PPL: {ppl}; Accuracy: {accuracy}; Token Accuracy: {token_accuracy}.')
+
+        accuracy, token_accuracy, ppl = evaluate(test_dataloader, tokenizer, ctx, emulator, student, args.max_new_tokens)
+        print (f'Test. PPL: {ppl}; Accuracy: {accuracy}; Token Accuracy: {token_accuracy}.')
         student.save_pretrained(os.path.join(args.save_model, 'student', f'checkpoint_{epoch}'))
         emulator.save_pretrained(os.path.join(args.save_model, 'emulator',  f'checkpoint_{epoch}'))
 
