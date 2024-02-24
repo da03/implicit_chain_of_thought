@@ -1,5 +1,7 @@
+import logging
 import torch
 import torch.nn as nn
+from torch.nn import CrossEntropyLoss
 from transformers import GPT2Model, GPT2LMHeadModel
 from transformers.modeling_outputs import BaseModelOutputWithPastAndCrossAttentions, CausalLMOutputWithCrossAttentions
 from typing import Optional, Tuple, Union, Dict, Any
@@ -133,7 +135,7 @@ class GPT2ImplicitModel(GPT2Model):
 
         if self.gradient_checkpointing and self.training:
             if use_cache:
-                logger.warning_once(
+                logging.warn(
                     "`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`..."
                 )
                 use_cache = False
