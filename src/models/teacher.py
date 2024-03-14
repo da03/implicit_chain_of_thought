@@ -13,7 +13,6 @@ from utils import get_sep_position, DoubleEOSStoppingCriteria, DoubleEOSLogitsPr
 from .modeling_gpt2_implicit import GPT2LMHeadImplicitModel
 from .modeling_llama_implicit import ImplicitLlamaForCausalLM
 
-
 class Teacher(nn.Module):
     def __init__(self, config, nopretrain=False):
         super().__init__()
@@ -21,6 +20,10 @@ class Teacher(nn.Module):
         if 'gpt2' in config.base_model:
             self.base_model = GPT2LMHeadImplicitModel.from_pretrained(config.base_model)
             num_layers = self.base_model.config.n_layer
+        elif 'mistral' in config.base_model.lower():
+            from transformers import MistralForCausalLM
+            self.base_model = MistralForCausalLM.from_pretrained(config.base_model)
+            num_layers = self.base_model.config.num_hidden_layers
         else:
             self.base_model = ImplicitLlamaForCausalLM.from_pretrained(config.base_model)
             num_layers = self.base_model.config.num_hidden_layers
@@ -124,6 +127,9 @@ class Teacher(nn.Module):
 
         # Since there's one eos after CoT and another after final answer, we need to wait for two eos
         generation_config = GenerationConfig.from_model_config(self.base_model.config)
+        if hasattr(generation_config, 'pad_token_id'):
+            #generation_config.pad_token_id = -1 #TODO: this might not be necessary
+            generation_config.pad_token_id = None #TODO: this might not be necessary
         if stop_on_two_eos:
             generation_config.eos_token_id = -1
             logits_processor = LogitsProcessorList([DoubleEOSLogitsProcessor(self.tokenizer.eos_token_id)])

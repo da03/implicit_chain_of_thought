@@ -18,6 +18,7 @@ def extract_answer(text):
 def extract_cot(text):
     split_pattern = '####'
     if split_pattern not in text:
+        #import pdb; pdb.set_trace()
         return None
     else:
         cot, _ = text.strip().split('####', 1)
@@ -28,12 +29,14 @@ class CoTDataset(Dataset):
     def __init__(self, tokenizer, file_path, max_length):
         assert os.path.isfile(file_path), f"Input file path {file_path} not found"
         print (f'Creating features from dataset file at {file_path}')
-        bos_tok = tokenizer.bos_token
+        eos_tok = tokenizer.eos_token
         eos_tok = tokenizer.eos_token
 
         with open(file_path, encoding="utf-8") as f:
-            lines = [line.split('||') for line in f.read().splitlines() if (len(line) > 0 and not line.isspace()
-                                                                             and len(line.split('||')) ==2 )]
+            #lines = [line.split('||') for line in f.read().splitlines() if (len(line) > 0 and not line.isspace()
+            #                                                                 and len(line.split('||')) ==2 )]
+            lines = [line.strip().split('||') for line in f.readlines() if (len(line.strip()) > 0 and not line.strip().isspace()
+                                                                             and len(line.strip().split('||')) ==2 )]
         src_lines, tgt_lines = list(zip(*lines))
         src_lines = list(src_lines)
         tgt_lines = list(tgt_lines)
@@ -46,13 +49,13 @@ class CoTDataset(Dataset):
             #import pdb; pdb.set_trace()
             ans = extract_answer(tgt)
             cot = extract_cot(tgt)
-            sent = ' {} {} '.format(src, bos_tok) + cot + ' {}'.format(eos_tok)
+            sent = ' {} {} '.format(src, eos_tok) + cot + ' {}'.format(eos_tok)
             edited_sents_cot.append(sent)
-            sent = ' {} {} '.format(src, bos_tok)
+            sent = ' {} {} '.format(src, eos_tok)
             edited_sents_only.append(sent)
-            sent = ' {} {} '.format(src, bos_tok) + cot + ' {} '.format(eos_tok) + ans + ' {}'.format(eos_tok)
+            sent = ' {} {} '.format(src, eos_tok) + cot + ' {} '.format(eos_tok) + ans + ' {}'.format(eos_tok)
             edited_sents_all.append(sent)
-            sent = ' {} {} '.format(src, bos_tok) + ans + ' {}'.format(eos_tok)
+            sent = ' {} {} '.format(src, eos_tok) + ans + ' {}'.format(eos_tok)
             edited_sents_nocot.append(sent)
 
         batch_encoding_cot = tokenizer(edited_sents_cot, add_special_tokens=True, truncation=True, max_length=max_length)
@@ -75,7 +78,7 @@ class CoTDataset(Dataset):
         temp_src_len = 0
         temp_tgt_len = 0
         temp_count = 0
-        separator = tokenizer.eos_token_id #tokenizer(bos_tok, add_special_tokens=False)['input_ids'][0]
+        separator = tokenizer.eos_token_id #tokenizer(eos_tok, add_special_tokens=False)['input_ids'][0]
         for i, elem in enumerate(self.labels_cot):
             sep_idx = elem.index(separator) + 1
             self.src_sent_cot.append(self.examples_cot[i][:sep_idx-1])
@@ -97,7 +100,7 @@ class CoTDataset(Dataset):
         temp_src_len = 0
         temp_tgt_len = 0
         temp_count = 0
-        separator = tokenizer(bos_tok, add_special_tokens=False)['input_ids'][0]
+        separator = tokenizer(eos_tok, add_special_tokens=False)['input_ids'][0]
         for i, elem in enumerate(self.labels_nocot):
             sep_idx = elem.index(separator) + 1
             self.src_sent_nocot.append(self.examples_nocot[i][:sep_idx-1])
