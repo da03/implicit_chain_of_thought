@@ -8,6 +8,7 @@ import inspect
 import tqdm
 import logging
 import random
+import math
 import torch.nn as nn
 
 from data import CoTDataset, CoTDataCollator
@@ -46,12 +47,12 @@ def evaluate(dataloader, tokenizer, ctx, teacher, emulator, delta, subset, mixtu
             #outputs = emulator.compute_loss(input_ids=input_ids_cot, teacher_states=teacher_states)
             loss = outputs.loss
         total_loss += outputs.total_loss.item()
-        total_mixture_component_loss += outputs.total_mixture_component_loss
+        total_mixture_component_loss += outputs.total_mixture_component_loss.item()
         total_instances += batch_size
 
     loss = total_loss / total_instances
     mixture_component_loss = total_mixture_component_loss / total_instances / teacher.num_layers
-    return loss, mixture_component_loss.exp()
+    return loss, math.exp(mixture_component_loss)
 
 def main():
     parser = argparse.ArgumentParser()
