@@ -33,6 +33,7 @@ def evaluate(dataloader, tokenizer, ctx, teacher, emulator, delta, subset, mixtu
     for batch in tqdm.tqdm(dataloader):
         #import pdb; pdb.set_trace()
         input_ids_cot = batch['input_ids_cot'].to(device)
+        input_ids_nocot = batch['input_ids_nocot'].to(device)
         batch_size = input_ids_cot.shape[0]
         with ctx:
             teacher_states, positions_to_extract_per_layer = teacher.extract_states(input_ids=input_ids_cot, delta=delta, subset=subset, return_positions=True)
