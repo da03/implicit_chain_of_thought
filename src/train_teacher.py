@@ -4,6 +4,7 @@ from torch.utils.data import DataLoader
 from transformers import AdamW
 import argparse
 import os
+import sys
 import tqdm
 import inspect
 import logging
@@ -37,7 +38,21 @@ def evaluate(dataloader, tokenizer, ctx, teacher, max_new_tokens):
     total_loss = 0
     for batch in tqdm.tqdm(dataloader):
         input_ids_all = batch['input_ids_all'].to(device)
-        labels = batch['labels_all'].to(device)
+        input_ids = input_ids_all
+        sep_position_1 = get_sep_position(input_ids, tokenizer.eos_token_id)[0]
+        sep_position_2 = get_sep_position(input_ids, tokenizer.eos_token_id, skip=1)[0]
+        sep_position_3 = get_sep_position(input_ids, tokenizer.eos_token_id, skip=2)[0]
+        sep_position_4 = get_sep_position(input_ids, tokenizer.eos_token_id, skip=3)[0]
+        sep_position_5 = get_sep_position(input_ids, tokenizer.eos_token_id, skip=4)[0]
+        ans_len_diff = sep_position_5 - sep_position_4 - (input_ids.shape[-1] - 1 - sep_position_5)
+        input_ids_problem_1 = torch.cat((input_ids[:, :sep_position_1+1], input_ids[:, sep_position_2+1:sep_position_3+1], input_ids[:, sep_position_4+1:sep_position_5+1]), dim=-1)
+        input_ids_problem_2 = torch.cat((input_ids[:, sep_position_1+1:sep_position_2+1], input_ids[:, sep_position_3+1:sep_position_4+1], input_ids[:, sep_position_4+1:sep_position_4+1+ans_len_diff],  input_ids[:, sep_position_5+1:]), dim=-1)
+        input_ids = torch.cat((input_ids_problem_1, input_ids_problem_2), dim=0)
+        input_ids_all = input_ids
+        labels = input_ids.data.clone()
+        sep_position =  get_sep_position(input_ids, tokenizer.eos_token_id)[0]
+        labels[:, :sep_position+1] = -100
+        #labels = batch['labels_all'].to(device)
         # Remove answer part
         sep_positions = get_sep_position(input_ids_all, tokenizer.eos_token_id)
         input_ids = input_ids_all[:, :sep_positions.max()+1]
@@ -120,16 +135,35 @@ def main():
 
     # Train
     step = 0
+    prev_token_accuracy = 0
     for epoch in range(args.epochs):
         print(f"Epoch {epoch}")
         teacher.train()
         for batch in tqdm.tqdm(train_dataloader):
+            #import pdb; pdb.set_trace()
+             #0 7 5 8 * 8 7 4 7<|endoftext|>6 3 4 4 * 7 2 0 4 <|endoftext|> 0 6 5 8 6 + 0 0 9 9 9 5 ( 0 6 4 8 6 6 ) + 0 0 0 8 2 4 3 ( 0 6 4 6 9 0 4 ) + 0 0 0 0 9 9 9 5<|endoftext|>2 5 0 1 3 + 0 2 7 8 8 0 ( 2 7 7 9 1 1 ) + 0 0 0 0 0 0 0 ( 2 7 7 9 1 1 0 ) + 0 0 0 4 4 7 7 1 <|endoftext|> #### 0 6 4 6 8 0 4 6<|endoftext|>2 7 7 3 6 8 7 1 <|endoftext|>
             input_ids = batch['input_ids_all'].to(device)
-            labels = batch['labels_all'].to(device)
+            sep_position_1 = get_sep_position(input_ids, tokenizer.eos_token_id)[0]
+            sep_position_2 = get_sep_position(input_ids, tokenizer.eos_token_id, skip=1)[0]
+            sep_position_3 = get_sep_position(input_ids, tokenizer.eos_token_id, skip=2)[0]
+            sep_position_4 = get_sep_position(input_ids, tokenizer.eos_token_id, skip=3)[0]
+            sep_position_5 = get_sep_position(input_ids, tokenizer.eos_token_id, skip=4)[0]
+            ans_len_diff = sep_position_5 - sep_position_4 - (input_ids.shape[-1] - 1 - sep_position_5)
+            input_ids_problem_1 = torch.cat((input_ids[:, :sep_position_1+1], input_ids[:, sep_position_2+1:sep_position_3+1], input_ids[:, sep_position_4+1:sep_position_5+1]), dim=-1)
+            input_ids_problem_2 = torch.cat((input_ids[:, sep_position_1+1:sep_position_2+1], input_ids[:, sep_position_3+1:sep_position_4+1], input_ids[:, sep_position_4+1:sep_position_4+1+ans_len_diff],  input_ids[:, sep_position_5+1:]), dim=-1)
+            input_ids = torch.cat((input_ids_problem_1, input_ids_problem_2), dim=0)
+            labels = input_ids.data.clone()
+            sep_position =  get_sep_position(input_ids, tokenizer.eos_token_id)[0]
+            labels[:, :sep_position+1] = -100
+            #labels = batch['labels_all'].to(device)
             with ctx:
                 outputs = teacher.compute_loss(input_ids=input_ids, labels=labels)
             loss = outputs.loss
             token_accuracy = outputs.token_accuracy.item()
+            if token_accuracy == 1 and prev_token_accuracy == 1:
+                print (f"Break Step: {step}. PPL: {ppl}. Token Accuracy: {token_accuracy}")
+                break
+            prev_token_accuracy = token_accuracy
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(trainable_params, args.max_grad_norm)
@@ -138,6 +172,7 @@ def main():
             ppl = loss.exp().item()
             if step % 100 == 0:
                 print (f"Step: {step}. PPL: {ppl}. Token Accuracy: {token_accuracy}")
+                sys.stdout.flush()
             step += 1
         accuracy, token_accuracy, ppl = evaluate(val_dataloader, tokenizer, ctx, teacher, args.max_new_tokens)
         print (f'Val. PPL: {ppl}; Accuracy: {accuracy}; Token Accuracy: {token_accuracy}.')

@@ -3,11 +3,13 @@ from torch.utils.data import DataLoader
 from transformers import AdamW
 import argparse
 import os
+import sys
 import inspect
 import tqdm
 import logging
 import random
 import torch.nn as nn
+from utils import get_sep_position
 
 from data import CoTDataset, CoTDataCollator
 from models.teacher import Teacher
@@ -29,11 +31,21 @@ def evaluate(dataloader, tokenizer, ctx, teacher, emulator, delta, subset):
     total_loss = 0
     for batch in tqdm.tqdm(dataloader):
         #import pdb; pdb.set_trace()
-        input_ids_cot = batch['input_ids_cot'].to(device)
-        batch_size = input_ids_cot.shape[0]
+        input_ids_all = batch['input_ids_all'].to(device)
+        sep_position_1 = get_sep_position(input_ids_all, tokenizer.eos_token_id)[0]
+        sep_position_2 = get_sep_position(input_ids_all, tokenizer.eos_token_id, skip=1)[0]
+        sep_position_3 = get_sep_position(input_ids_all, tokenizer.eos_token_id, skip=2)[0]
+        sep_position_4 = get_sep_position(input_ids_all, tokenizer.eos_token_id, skip=3)[0]
+        sep_position_5 = get_sep_position(input_ids_all, tokenizer.eos_token_id, skip=4)[0]
+        ans_len_diff = sep_position_5 - sep_position_4 - (input_ids_all.shape[-1] - 1 - sep_position_5)
+        input_ids_problem_1 = torch.cat((input_ids_all[:, :sep_position_1+1], input_ids_all[:, sep_position_2+1:sep_position_3+1], input_ids_all[:, sep_position_4+1:sep_position_5+1]), dim=-1)
+        input_ids_problem_2 = torch.cat((input_ids_all[:, sep_position_1+1:sep_position_2+1], input_ids_all[:, sep_position_3+1:sep_position_4+1], input_ids_all[:, sep_position_4+1:sep_position_4+1+ans_len_diff],  input_ids_all[:, sep_position_5+1:]), dim=-1)
+        batch_size = input_ids_all.shape[0]
         with ctx:
-            teacher_states = teacher.extract_states(input_ids=input_ids_cot, delta=delta, subset=subset)
-            outputs = emulator.compute_loss(input_ids=input_ids_cot, teacher_states=teacher_states)
+            teacher_states_1 = teacher.extract_states(input_ids=input_ids_problem_1, delta=delta, subset=subset)
+            teacher_states_2 = teacher.extract_states(input_ids=input_ids_problem_2, delta=delta, subset=subset)
+            teacher_states = [teacher_state_1 + teacher_state_2 for teacher_state_1, teacher_state_2 in zip(teacher_states_1, teacher_states_2)]
+            outputs = emulator.compute_loss(input_ids=input_ids_all, teacher_states=teacher_states)
             loss = outputs.loss
         total_loss += outputs.total_loss.item()
         total_instances += batch_size
@@ -98,11 +110,21 @@ def main():
 
         for batch in tqdm.tqdm(train_dataloader):
             #import pdb; pdb.set_trace()
-            input_ids_cot = batch['input_ids_cot'].to(device)
+            input_ids_all = batch['input_ids_all'].to(device)
+            sep_position_1 = get_sep_position(input_ids_all, tokenizer.eos_token_id)[0]
+            sep_position_2 = get_sep_position(input_ids_all, tokenizer.eos_token_id, skip=1)[0]
+            sep_position_3 = get_sep_position(input_ids_all, tokenizer.eos_token_id, skip=2)[0]
+            sep_position_4 = get_sep_position(input_ids_all, tokenizer.eos_token_id, skip=3)[0]
+            sep_position_5 = get_sep_position(input_ids_all, tokenizer.eos_token_id, skip=4)[0]
+            ans_len_diff = sep_position_5 - sep_position_4 - (input_ids_all.shape[-1] - 1 - sep_position_5)
+            input_ids_problem_1 = torch.cat((input_ids_all[:, :sep_position_1+1], input_ids_all[:, sep_position_2+1:sep_position_3+1], input_ids_all[:, sep_position_4+1:sep_position_5+1]), dim=-1)
+            input_ids_problem_2 = torch.cat((input_ids_all[:, sep_position_1+1:sep_position_2+1], input_ids_all[:, sep_position_3+1:sep_position_4+1], input_ids_all[:, sep_position_4+1:sep_position_4+1+ans_len_diff],  input_ids_all[:, sep_position_5+1:]), dim=-1)
             input_ids_nocot = batch['input_ids_nocot'].to(device)
             with ctx:
                 with torch.no_grad():
-                    teacher_states = teacher.extract_states(input_ids=input_ids_cot, delta=args.delta, subset=args.subset)
+                    teacher_states_1 = teacher.extract_states(input_ids=input_ids_problem_1, delta=args.delta, subset=args.subset)
+                    teacher_states_2 = teacher.extract_states(input_ids=input_ids_problem_2, delta=args.delta, subset=args.subset)
+                    teacher_states = [teacher_state_1 + teacher_state_2 for teacher_state_1, teacher_state_2 in zip(teacher_states_1, teacher_states_2)]
                 outputs = emulator.compute_loss(input_ids=input_ids_nocot, teacher_states=teacher_states)
             loss = outputs.loss
 
@@ -112,6 +134,7 @@ def main():
             optimizer.zero_grad()
             if step % 100 == 0:
                 print (f"Step: {step}. Loss: {loss}.")
+                sys.stdout.flush()
             step += 1
         loss = evaluate(val_dataloader, tokenizer, ctx, teacher, emulator, args.delta, args.subset)
         print (f'Val. Loss: {loss}.')

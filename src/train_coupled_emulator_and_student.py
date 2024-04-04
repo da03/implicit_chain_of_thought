@@ -55,7 +55,7 @@ def evaluate(dataloader, tokenizer, ctx, emulator, student, max_new_tokens):
             )
 
         # Evaluate
-        sep_positions = get_sep_position(input_ids_nocot, tokenizer.eos_token_id)
+        sep_positions = get_sep_position(input_ids_nocot, tokenizer.eos_token_id, skip=1)
         for i, (input_ids_i, beam_output_i) in enumerate(zip(input_ids_nocot, beam_output)):
             sep_position = sep_positions[i].item()
             tgt = input_ids_i[sep_position+1:]

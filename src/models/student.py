@@ -3,10 +3,10 @@ import os
 import logging
 import torch
 import torch.nn as nn
-from transformers import AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, StoppingCriteriaList, GenerationConfig, LogitsProcessorList
 
 sys.path.append("..")
-from utils import get_sep_position
+from utils import get_sep_position, DoubleEOSStoppingCriteria, DoubleEOSLogitsProcessor
 from .configuration_student import StudentConfig
 from .modeling_gpt2_implicit import GPT2LMHeadImplicitModel
 
@@ -37,7 +37,7 @@ class Student(nn.Module):
 
     def compute_loss(self, input_ids, labels, teacher_states):
         #import pdb; pdb.set_trace()
-        sep_positions = get_sep_position(input_ids, self.tokenizer.eos_token_id)
+        sep_positions = get_sep_position(input_ids, self.tokenizer.eos_token_id, skip=1)
         # First, project teacher states
         teacher_states = [self.mlps[l](teacher_states[l]) for l in range(len(teacher_states))]
 
@@ -64,12 +64,16 @@ class Student(nn.Module):
         return outputs
 
     def generate(self, input_ids, teacher_states, max_new_tokens=512, num_beams=1):
-        sep_positions = get_sep_position(input_ids, self.tokenizer.eos_token_id)
+        sep_positions = get_sep_position(input_ids, self.tokenizer.eos_token_id, skip=1)
         batch_size = input_ids.shape[0]
         beam_output = []
         # First, project teacher states
         teacher_states = [self.mlps[l](teacher_states[l]) for l in range(len(teacher_states))]
+        generation_config = GenerationConfig.from_model_config(self.base_model.config)
+        generation_config.eos_token_id = -1
         for i in range(batch_size):
+            logits_processor = LogitsProcessorList([DoubleEOSLogitsProcessor(self.tokenizer.eos_token_id)])
+            stopping_criteria = StoppingCriteriaList([DoubleEOSStoppingCriteria(self.tokenizer.eos_token_id)])
             input_ids_i = input_ids[i:i+1]
             sep_positions_i = sep_positions[i:i+1]
             input_ids_i = input_ids_i[:, :sep_positions_i+1]
@@ -82,6 +86,9 @@ class Student(nn.Module):
                 positions_to_substitute=sep_positions_i.repeat_interleave(num_beams, dim=0),
                 states_to_substitute=[z[i:i+1].repeat_interleave(num_beams, dim=0) for z in teacher_states],
                 mode='forward_student',
+                generation_config=generation_config,
+                logits_processor=logits_processor,
+                stopping_criteria=stopping_criteria,
             )
             beam_output.append(beam_output_i)
         return beam_output

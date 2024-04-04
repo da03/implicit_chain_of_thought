@@ -34,11 +34,21 @@ def evaluate(dataloader, tokenizer, ctx, teacher, student, delta, subset, max_ne
     total_loss = 0
     for batch in tqdm.tqdm(dataloader):
         input_ids_all = batch['input_ids_all'].to(device)
+        sep_position_1 = get_sep_position(input_ids_all, tokenizer.eos_token_id)[0]
+        sep_position_2 = get_sep_position(input_ids_all, tokenizer.eos_token_id, skip=1)[0]
+        sep_position_3 = get_sep_position(input_ids_all, tokenizer.eos_token_id, skip=2)[0]
+        sep_position_4 = get_sep_position(input_ids_all, tokenizer.eos_token_id, skip=3)[0]
+        sep_position_5 = get_sep_position(input_ids_all, tokenizer.eos_token_id, skip=4)[0]
+        ans_len_diff = sep_position_5 - sep_position_4 - (input_ids_all.shape[-1] - 1 - sep_position_5)
+        input_ids_problem_1 = torch.cat((input_ids_all[:, :sep_position_1+1], input_ids_all[:, sep_position_2+1:sep_position_3+1], input_ids_all[:, sep_position_4+1:sep_position_5+1]), dim=-1)
+        input_ids_problem_2 = torch.cat((input_ids_all[:, sep_position_1+1:sep_position_2+1], input_ids_all[:, sep_position_3+1:sep_position_4+1], input_ids_all[:, sep_position_4+1:sep_position_4+1+ans_len_diff],  input_ids_all[:, sep_position_5+1:]), dim=-1)
         input_ids_nocot = batch['input_ids_nocot'].to(device)
         labels_nocot = batch['labels_nocot'].to(device)
         batch_size = input_ids_nocot.shape[0]
         with ctx:
-            teacher_states = teacher.extract_states(input_ids=input_ids_all, delta=delta, subset=subset)
+            teacher_states_1 = teacher.extract_states(input_ids=input_ids_problem_1, delta=delta, subset=subset)
+            teacher_states_2 = teacher.extract_states(input_ids=input_ids_problem_2, delta=delta, subset=subset)
+            teacher_states = [teacher_state_1 + teacher_state_2 for teacher_state_1, teacher_state_2 in zip(teacher_states_1, teacher_states_2)]
             outputs = student.compute_loss(input_ids=input_ids_nocot, labels=labels_nocot, teacher_states=teacher_states)
             loss = outputs.loss
             token_accuracy = outputs.token_accuracy.item()
@@ -56,7 +66,7 @@ def evaluate(dataloader, tokenizer, ctx, teacher, student, delta, subset, max_ne
             )
 
         # Evaluate
-        sep_positions = get_sep_position(input_ids_all, tokenizer.eos_token_id)
+        sep_positions = get_sep_position(input_ids_all, tokenizer.eos_token_id, skip=1)
         for i, (input_ids_all_i, beam_output_i) in enumerate(zip(input_ids_all, beam_output)):
             sep_position = sep_positions[i].item()
             tgt = input_ids_all_i[sep_position+1:]
@@ -136,11 +146,23 @@ def main():
 
         for batch in tqdm.tqdm(train_dataloader):
             input_ids_all = batch['input_ids_all'].to(device)
+
+            sep_position_1 = get_sep_position(input_ids_all, tokenizer.eos_token_id)[0]
+            sep_position_2 = get_sep_position(input_ids_all, tokenizer.eos_token_id, skip=1)[0]
+            sep_position_3 = get_sep_position(input_ids_all, tokenizer.eos_token_id, skip=2)[0]
+            sep_position_4 = get_sep_position(input_ids_all, tokenizer.eos_token_id, skip=3)[0]
+            sep_position_5 = get_sep_position(input_ids_all, tokenizer.eos_token_id, skip=4)[0]
+            ans_len_diff = sep_position_5 - sep_position_4 - (input_ids_all.shape[-1] - 1 - sep_position_5)
+            input_ids_problem_1 = torch.cat((input_ids_all[:, :sep_position_1+1], input_ids_all[:, sep_position_2+1:sep_position_3+1], input_ids_all[:, sep_position_4+1:sep_position_5+1]), dim=-1)
+            input_ids_problem_2 = torch.cat((input_ids_all[:, sep_position_1+1:sep_position_2+1], input_ids_all[:, sep_position_3+1:sep_position_4+1], input_ids_all[:, sep_position_4+1:sep_position_4+1+ans_len_diff],  input_ids_all[:, sep_position_5+1:]), dim=-1)
             input_ids_nocot = batch['input_ids_nocot'].to(device)
             labels_nocot = batch['labels_nocot'].to(device)
             with ctx:
                 with torch.no_grad():
-                    teacher_states = teacher.extract_states(input_ids=input_ids_all, delta=args.delta, subset=args.subset)
+                    #import pdb; pdb.set_trace()
+                    teacher_states_1 = teacher.extract_states(input_ids=input_ids_problem_1, delta=args.delta, subset=args.subset)
+                    teacher_states_2 = teacher.extract_states(input_ids=input_ids_problem_2, delta=args.delta, subset=args.subset)
+                    teacher_states = [teacher_state_1 + teacher_state_2 for teacher_state_1, teacher_state_2 in zip(teacher_states_1, teacher_states_2)]
                 outputs = student.compute_loss(input_ids=input_ids_nocot, labels=labels_nocot, teacher_states=teacher_states)
             loss = outputs.loss
             token_accuracy = outputs.token_accuracy.item()
