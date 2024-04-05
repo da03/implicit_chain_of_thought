@@ -37,8 +37,11 @@ class Teacher(nn.Module):
         self.num_layers = num_layers
         self.hidden_size = hidden_size
 
-    def forward(self, input_ids):
-        outputs = self.base_model.forward(input_ids=input_ids)
+    def forward(self, input_ids, position_ids=None):
+        if position_ids is not None:
+            outputs = self.base_model.forward(input_ids=input_ids, position_ids=position_ids)
+        else:
+            outputs = self.base_model.forward(input_ids=input_ids)
         return outputs
 
     def compute_positions_to_extract_per_layer(self, subset, delta, first_sep_positions, second_sep_positions):
@@ -98,9 +101,9 @@ class Teacher(nn.Module):
             return teacher_states_extracted
         return teacher_states_extracted, positions_to_extract_per_layer
 
-    def compute_loss(self, input_ids, labels):
+    def compute_loss(self, input_ids, labels, position_ids=None):
         #import pdb; pdb.set_trace()
-        outputs = self.forward(input_ids=input_ids)
+        outputs = self.forward(input_ids=input_ids, position_ids=position_ids)
         logits = outputs.logits
 
         labels_pred = logits.argmax(-1)
@@ -121,7 +124,7 @@ class Teacher(nn.Module):
         outputs.total_tokens = total_tokens
         return outputs
 
-    def generate(self, input_ids, max_new_tokens=512, num_beams=1, stop_on_two_eos=True):
+    def generate(self, input_ids, max_new_tokens=512, num_beams=1, stop_on_two_eos=True, position_ids=None):
         sep_positions = get_sep_position(input_ids, self.tokenizer.eos_token_id)
         batch_size = input_ids.shape[0]
 
@@ -140,16 +143,31 @@ class Teacher(nn.Module):
 
         if sep_positions.eq(sep_positions[0]).all():
             input_ids = input_ids[:, :sep_positions[0]+1]
-            beam_output = self.base_model.generate(
-                input_ids=input_ids,
-                generation_config=generation_config,
-                max_new_tokens=max_new_tokens,
-                num_beams=num_beams,
-                early_stopping=True,
-                num_return_sequences=1,
-                logits_processor=logits_processor,
-                stopping_criteria=stopping_criteria,
-            )
+            if position_ids is not None:
+                position_ids = position_ids[:, :sep_positions[0]+1]
+            if position_ids is not None:
+                beam_output = self.base_model.generate(
+                    input_ids=input_ids,
+                    position_ids=position_ids,
+                    generation_config=generation_config,
+                    max_new_tokens=max_new_tokens,
+                    num_beams=num_beams,
+                    early_stopping=True,
+                    num_return_sequences=1,
+                    logits_processor=logits_processor,
+                    stopping_criteria=stopping_criteria,
+                )
+            else:
+                beam_output = self.base_model.generate(
+                    input_ids=input_ids,
+                    generation_config=generation_config,
+                    max_new_tokens=max_new_tokens,
+                    num_beams=num_beams,
+                    early_stopping=True,
+                    num_return_sequences=1,
+                    logits_processor=logits_processor,
+                    stopping_criteria=stopping_criteria,
+                )
             beam_output = beam_output.unsqueeze(1)
         else:
             beam_output = []
@@ -157,8 +175,10 @@ class Teacher(nn.Module):
                 input_ids_i = input_ids[i:i+1]
                 sep_positions_i = sep_positions[i:i+1]
                 input_ids_i = input_ids_i[:, :sep_positions_i+1]
+                position_ids_i = position_ids[i:i+1, :sep_positions_i+1]
                 beam_output_i = self.base_model.generate(
                     input_ids=input_ids_i,
+                    position_ids=position_ids_i,
                     generation_config=generation_config,
                     max_new_tokens=max_new_tokens,
                     num_beams=num_beams,

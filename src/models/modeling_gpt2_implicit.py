@@ -481,8 +481,8 @@ class GPT2LMHeadImplicitModel(GPT2LMHeadModel):
             position_ids.masked_fill_(attention_mask == 0, 1)
             if past_key_values:
                 position_ids = position_ids[:, -1].unsqueeze(-1)
-        else:
-            position_ids = None
+        #else:
+        #    position_ids = None
 
         # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
         if inputs_embeds is not None and past_key_values is None:
@@ -526,6 +526,11 @@ class GPT2LMHeadImplicitModel(GPT2LMHeadModel):
         if "token_type_ids" in model_kwargs:
             token_type_ids = model_kwargs["token_type_ids"]
             model_kwargs["token_type_ids"] = torch.cat([token_type_ids, token_type_ids[:, -1].unsqueeze(-1)], dim=-1)
+
+        #import pdb; pdb.set_trace()
+        if "position_ids" in model_kwargs:
+            position_ids = model_kwargs["position_ids"]
+            model_kwargs["position_ids"] = position_ids[:, -1].unsqueeze(-1)+1
 
         if not is_encoder_decoder:
             # update attention mask
