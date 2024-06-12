@@ -37,11 +37,11 @@ class Teacher(nn.Module):
         self.num_layers = num_layers
         self.hidden_size = hidden_size
 
-    def forward(self, input_ids, position_ids=None):
+    def forward(self, input_ids, position_ids=None, output_attentions=False):
         if position_ids is not None:
-            outputs = self.base_model.forward(input_ids=input_ids, position_ids=position_ids)
+            outputs = self.base_model.forward(input_ids=input_ids, position_ids=position_ids, output_attentions=output_attentions)
         else:
-            outputs = self.base_model.forward(input_ids=input_ids)
+            outputs = self.base_model.forward(input_ids=input_ids, output_attentions=output_attentions)
         return outputs
 
     def compute_positions_to_extract_per_layer(self, subset, delta, first_sep_positions, second_sep_positions):
@@ -101,9 +101,9 @@ class Teacher(nn.Module):
             return teacher_states_extracted
         return teacher_states_extracted, positions_to_extract_per_layer
 
-    def compute_loss(self, input_ids, labels, position_ids=None):
+    def compute_loss(self, input_ids, labels, position_ids=None, output_attentions=False):
         #import pdb; pdb.set_trace()
-        outputs = self.forward(input_ids=input_ids, position_ids=position_ids)
+        outputs = self.forward(input_ids=input_ids, position_ids=position_ids, output_attentions=output_attentions)
         logits = outputs.logits
 
         labels_pred = logits.argmax(-1)

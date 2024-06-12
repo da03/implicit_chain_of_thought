@@ -52,7 +52,7 @@ def compute_distribution(lamb, truncate_length=100):
 
     
 @torch.no_grad()
-def evaluate(dataloader, tokenizer, ctx, teacher, max_new_tokens, to_delete_min, delete_side, delete_eos, lamb, probs, keep_position=False, keep_allposition=False, start_from=0):
+def evaluate(dataloader, tokenizer, ctx, teacher, max_new_tokens, to_delete_min, delete_side, delete_eos, lamb, probs, keep_position=False, keep_allposition=False, start_from=0, disable_offset=False):
     teacher.eval()
     total_instances = 0
     total_tokens = 0
@@ -80,6 +80,8 @@ def evaluate(dataloader, tokenizer, ctx, teacher, max_new_tokens, to_delete_min,
             input_ids_all_tmp = []
             labels_tmp = []
             offset = torch.multinomial(probs, batch_size, replacement=True)
+            if disable_offset:
+                offset = offset * 0
             to_delete = to_delete_min + offset.to(input_ids.device)
             if delete_side == 'left':
                 start_positions = first_sep_positions + 1 # remove from, including
@@ -161,7 +163,7 @@ def main():
     parser.add_argument('--epochs', type=int, default=1)
     parser.add_argument('--truncation', type=int, default=1024)
     parser.add_argument('--delete_per_epoch', type=float, default=0)
-    parser.add_argument('--delete_beyond', type=int, default=-1)
+    parser.add_argument('--delete_beyond', type=int, default=2048)
     parser.add_argument('--delete_side', type=str, choices=['left', 'right'], default='left')
     parser.add_argument('--delete_type', type=str, choices=['epoch', 'step', 'threshold'], default='epoch')
     parser.add_argument('--tokenizer', type=str, default=None)
@@ -340,19 +342,24 @@ def main():
         else:
             teacher.eval()
         #import pdb; pdb.set_trace()
+        deleted = 0
+        prev_flag_all_deleted = False
         for batch in tqdm.tqdm(train_dataloader):
             if args.delete_type == 'step':
                 prev_to_delete_min = to_delete_min
                 #to_delete_min = step / steps_per_epoch * args.delete_per_epoch + args.start_from
                 #to_delete_min = int(round(to_delete_min))
-                if delete_step_timer == steps_per_delete:
+                if delete_step_timer == steps_per_delete or steps_per_delete == 0:
+                    deleted += 1
+                    if deleted == args.delete_per_epoch + 1:
+                        break
                     to_delete_min += 1
                     delete_step_timer = 0
                 if epoch >= args.pretrain_epoch:
                     delete_step_timer += 1
                 if to_delete_min > prev_to_delete_min:
                     print(f" -epoch {epoch}. step {step}. deleting: {to_delete_min}")
-                    if args.reset_optimizer:
+                    if args.reset_optimizer and (not prev_flag_all_deleted):
                         print ('RESETTING OPTIMIZER')
                         optimizer.zero_grad(set_to_none=True)
                         del optimizer
@@ -382,7 +389,7 @@ def main():
                 offset = torch.multinomial(probs, batch_size, replacement=True)
                 to_delete = to_delete_min + offset.to(input_ids.device)
                 if epoch < args.pretrain_epoch:
-                    to_delete.fill_(0)
+                    to_delete.fill_(args.start_from)
                 if args.keep_position or args.keep_allposition:
                     position_ids = torch.arange(0, input_ids.shape[-1], dtype=torch.long, device=device).unsqueeze(0).repeat(batch_size, 1)
                 if args.delete_side == 'left':
@@ -416,6 +423,7 @@ def main():
                 labels = batch_ids(labels_tmp, tokenizer.eos_token_id, input_ids.device, input_ids.dtype)
             #import pdb; pdb.set_trace()
             print (input_ids.shape)
+            prev_flag_all_deleted = flag_all_deleted
             if args.max_len_train > 0 and input_ids.shape[-1] > args.max_len_train:
                 print ('skipped')
                 if args.delete_type == 'step':
@@ -440,6 +448,9 @@ def main():
 
             ppl = loss.exp().item()
             if args.oraccuracy and epoch >= args.pretrain_epoch and token_accuracy == 1:
+                deleted += 1
+                if deleted == args.delete_per_epoch + 1:
+                    break
                 prev_to_delete_min = to_delete_min
                 to_delete_min += 1
                 if to_delete_min > prev_to_delete_min:
@@ -479,6 +490,8 @@ def main():
         #sys.stdout.flush()
         accuracy, token_accuracy, ppl = evaluate(val_dataloader, tokenizer, ctx, teacher, args.max_new_tokens, to_delete_min, args.delete_side, args.delete_eos, args.lamb, probs, keep_position=args.keep_position, keep_allposition=args.keep_allposition, start_from=args.minus_start_from)
         print (f'Val. PPL: {ppl}; Accuracy: {accuracy}; Token Accuracy: {token_accuracy}.')
+        accuracy, token_accuracy, ppl = evaluate(val_dataloader, tokenizer, ctx, teacher, args.max_new_tokens, to_delete_min, args.delete_side, args.delete_eos, args.lamb, probs, keep_position=args.keep_position, keep_allposition=args.keep_allposition, start_from=args.minus_start_from, disable_offset=True)
+        print (f'Disable Offset Val. PPL: {ppl}; Accuracy: {accuracy}; Token Accuracy: {token_accuracy}.')
         teacher.save_pretrained(os.path.join(args.save_model, f'checkpoint_{epoch}'))
 
 if __name__ == "__main__":
