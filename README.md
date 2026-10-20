@@ -171,13 +171,40 @@ TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 stdbuf -oL -eL python src/ge
 
 ## Citation
 
-```
+If you build on implicit chain-of-thought reasoning or use this implementation, please cite:
+
+**[Implicit Chain of Thought Reasoning via Knowledge Distillation](https://arxiv.org/abs/2311.01460)**
+
+First posted November 2, 2023.
+
+```bibtex
 @misc{deng2023implicit,
-      title={Implicit Chain of Thought Reasoning via Knowledge Distillation}, 
+      title={{Implicit Chain of Thought Reasoning via Knowledge Distillation}},
       author={Yuntian Deng and Kiran Prasad and Roland Fernandez and Paul Smolensky and Vishrav Chaudhary and Stuart Shieber},
       year={2023},
       eprint={2311.01460},
       archivePrefix={arXiv},
-      primaryClass={cs.CL}
+      primaryClass={cs.CL},
+      url={https://arxiv.org/abs/2311.01460}
+}
+```
+
+### Related paper: Stepwise Internalization
+
+The later paper below develops Stepwise Internalization, which gradually removes explicit CoT tokens during training. Cite it when using or discussing that method.
+
+**[From Explicit CoT to Implicit CoT: Learning to Internalize CoT Step by Step](https://arxiv.org/abs/2405.14838)**
+
+First posted May 23, 2024.
+
+```bibtex
+@misc{deng2024explicit,
+      title={{From Explicit CoT to Implicit CoT: Learning to Internalize CoT Step by Step}},
+      author={Yuntian Deng and Yejin Choi and Stuart Shieber},
+      year={2024},
+      eprint={2405.14838},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL},
+      url={https://arxiv.org/abs/2405.14838}
 }
 ```
