@@ -41,6 +41,26 @@ def evaluate(dataloader, tokenizer, ctx, teacher, emulator, delta, subset):
     loss = total_loss / total_instances
     return loss
 
+# find comma and <end of sequence>
+def find_index(input_ids, tokenizer):
+     eos_tok = tokenizer.eos_token
+     eos , _= tokenizer(eos_tok).values()
+     comma, _ = tokenizer(',',add_special_tokens=True,  truncation = True, max_length = 1024).values()
+     eos = eos[0]
+     comma = comma[0]
+     
+     _ , a = torch.nonzero(input_ids == comma , as_tuple= True)
+     _ , b = torch.nonzero(input_ids == eos , as_tuple= True)
+     
+     return list((a[0].item(), b[0].item()- a[0].item()+1 ,a[1].item() - b[0].item() , b[1].item() - a[1].item()))
+ 
+# adding teacher states elementwise
+# def add_two_teacher_states(teacher_states_1, teacher_states_2):
+#     added_teacher_states = []
+#     for t1,t2 in zip(teacher_states_1, teacher_states_2):
+#         added_teacher_states.append(torch.add(t1,t2))
+#     return added_teacher_states
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--teacher', type=str, required=True)
@@ -98,12 +118,21 @@ def main():
 
         for batch in tqdm.tqdm(train_dataloader):
             #import pdb; pdb.set_trace()
-            input_ids_cot = batch['input_ids_cot'].to(device)
+            input_ids_full = batch['input_ids_cot'].to(device)
             input_ids_nocot = batch['input_ids_nocot'].to(device)
+            
+            input_1 , input_2, cot_1, cot_2 = torch.split(input_ids_full ,find_index(input_ids_full, tokenizer), dim = 1)
+                    
+            input_ids_1 = torch.cat((input_1, cot_1), 1)
+            input_ids_2 = torch.cat((input_2, cot_2), 1)
+            
             with ctx:
                 with torch.no_grad():
-                    teacher_states = teacher.extract_states(input_ids=input_ids_cot, delta=args.delta, subset=args.subset)
-                outputs = emulator.compute_loss(input_ids=input_ids_nocot, teacher_states=teacher_states)
+                    teacher_states_1 =  teacher.extract_states(input_ids=input_ids_1, delta=args.delta, subset=args.subset)
+                    teacher_states_2 =  teacher.extract_states(input_ids=input_ids_2, delta=args.delta, subset=args.subset)
+                    added_teacher_states = [torch.add(t1,t2) for t1,t2 in zip(teacher_states_1, teacher_states_2)]
+                    
+                outputs = emulator.compute_loss(input_ids=input_ids_nocot, teacher_states= added_teacher_states)
             loss = outputs.loss
 
             loss.backward()
